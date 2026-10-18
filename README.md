@@ -50,54 +50,23 @@ Autopilot lives in the Explorer sidebar of Antigravity IDE (and any VS Code comp
 
 ## Supported models
 
-These are the models in the default `ragAssistant.models` list. Availability depends on your account with each provider, and you can add any model your provider offers with **Autopilot: Add Model** or in settings.
+The model picker lists these 13 models, grouped into 8 rows. Models of the same family and provider share one row with a **slider** for the variant: move it to switch model.
 
-### Ollama
+| Picker row | Variants (slider) | Model IDs | Notes |
+|---|---|---|---|
+| **Gemma 4 31B** (Ollama) | | `gemma4:31b-cloud` | Understands screenshots and images. The default vision model |
+| **GPT-OSS** (Ollama) | 20B · 120B | `gpt-oss:20b-cloud`<br>`gpt-oss:120b-cloud` | 20B is the fastest for quick answers; 120B is strong at reasoning for complex tasks |
+| **Beam 550B** (Ollama) | | `beam` | Largest model, for the toughest challenges |
+| **Nemotron 3** (Ollama) | Nano 30B · Super 120B · Ultra 550B | `nemotron-3-nano:30b-cloud`<br>`nemotron-3-super:cloud`<br>`nemotron-3-ultra:cloud` | Nano is light and fast; Super balances reasoning and tool use; Ultra is the most capable |
+| **Nemotron 3.5** (OpenRouter) | Lightning 30B · SuperVL 120B | `nvidia/nemotron-3.5-lightning:free`<br>`nvidia/nemotron-3.5-super-vl:free` | Lightning is light and fast; SuperVL reads images and reasons well |
+| **Xing 4.0 29B** (OpenRouter) | | `xingchen-agi/xing4.0-29b-a4b:free` | Fast general model |
+| **Gemma 4 26B** (OpenRouter) | | `google/gemma-4-26b-a4b-it:free` | Understands images **and audio**. The default audio model |
+| **Inkling** (OpenRouter) | 276B · 975B | `thinkingmachines/inkling-small:free`<br>`thinkingmachines/inkling:free` | 276B answers quicker; 975B is the largest, for the toughest challenges |
 
-| Model | ID | Notes |
-|---|---|---|
-| Gemma 4 31B | `gemma4:31b-cloud` | Understands images; the default vision model |
-| GPT-OSS 120B | `gpt-oss:120b-cloud` | Strong reasoning. Variant of the **GPT-OSS** row |
-| GPT-OSS 20B | `gpt-oss:20b-cloud` | Fastest for quick answers. Variant of the **GPT-OSS** row |
-| Beam 550B | `beam` | Largest model for the toughest challenges |
-| Nemotron 3 Nano 30B | `nemotron-3-nano:30b-cloud` | Light and fast. Variant of the **Nemotron 3** row |
-| Nemotron 3 Super 120B | `nemotron-3-super:cloud` | Balanced reasoning and tool use. Variant of the **Nemotron 3** row |
-| Nemotron 3 Ultra 550B | `nemotron-3-ultra:cloud` | Most capable Nemotron. Variant of the **Nemotron 3** row |
-| Ollama (local) | `llama3.2` | Local server at `http://localhost:11434`, no key |
-| Llama 3.2 Vision (local) | `llama3.2-vision` | Local, understands images |
-| Codestral (local) | `codestral` | Local, code model |
-
-Ollama Cloud uses `https://ollama.com` with your Ollama API key.
-
-### OpenRouter
-
-| Model | ID | Notes |
-|---|---|---|
-| Nemotron 3.5 SuperVL 120B | `nvidia/nemotron-3.5-super-vl:free` | Reads images. Variant of the **Nemotron 3.5** row |
-| Nemotron 3.5 Lightning 30B | `nvidia/nemotron-3.5-lightning:free` | Light and fast. Variant of the **Nemotron 3.5** row |
-| Xing 4.0 29B | `xingchen-agi/xing4.0-29b-a4b:free` | Fast general model |
-| Gemma 4 26B | `google/gemma-4-26b-a4b-it:free` | Understands images **and audio**; the default audio model |
-| Inkling 975B | `thinkingmachines/inkling:free` | Largest Inkling. Variant of the **Inkling** row |
-| Inkling 276B | `thinkingmachines/inkling-small:free` | Smaller Inkling. Variant of the **Inkling** row |
-| Claude Sonnet 4.5 | `anthropic/claude-sonnet-4-5` | Paid |
-| DeepSeek R1 | `deepseek/deepseek-r1` | Reasoning |
-| DeepSeek V3 | `deepseek/deepseek-chat-v3-0324` | General |
-| Llama 4 Maverick | `meta-llama/llama-4-maverick` | General |
-| QwQ 32B | `qwen/qwq-32b` | Reasoning |
-| Mistral Large | `mistralai/mistral-large-2411` | General |
-
-The `:free` models are free to use but rate limited, and some are restricted to agentic apps (see *OpenRouter free models* below). One OpenRouter key serves all of them.
-
-### OpenAI and Google
-
-| Model | ID |
-|---|---|
-| GPT-4o | `gpt-4o` |
-| GPT-4o Mini | `gpt-4o-mini` |
-| Gemini 2.5 Flash | `gemini-2.5-flash` |
-| Gemini 2.5 Pro | `gemini-2.5-pro` |
-
-Models of the same family and provider share one row in the picker with a slider for the variant, for example **Nemotron 3 (Ollama)** with *Nano 30B · Super 120B · Ultra 550B*.
+- **Ollama** models run on Ollama Cloud (`https://ollama.com`, your Ollama API key). **OpenRouter** models use one OpenRouter key for all of them.
+- The `:free` models are free to use but rate limited, and some are restricted to agentic apps (see *OpenRouter free models* below).
+- Availability depends on your account with each provider.
+- **Other models:** add OpenAI, Gemini, a local Ollama server or any OpenAI-compatible endpoint with **Autopilot: Add Model**, or by editing `ragAssistant.models` (`provider` is `ollama`, `openai`, `gemini`, `openrouter` or `custom`). Give models a shared `family` and a `variant` to put them on one slider row.
 
 ---
 
