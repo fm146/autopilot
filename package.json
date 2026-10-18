@@ -1,0 +1,470 @@
+{
+  "name": "autopilot",
+  "displayName": "Autopilot",
+  "description": "Autopilot - an AI coding assistant made from reverse engineered Jetski RAG architecture",
+  "version": "1.2.3",
+  "publisher": "hintstechnology",
+  "author": "Hints Technology",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "type": "webview",
+          "id": "ragAssistant.chatView",
+          "name": "Autopilot",
+          "icon": "media/autopilot.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ragAssistant.addModel",
+        "title": "Autopilot: Add Model"
+      },
+      {
+        "command": "ragAssistant.setApiKey",
+        "title": "Autopilot: Set API Key for Model"
+      },
+      {
+        "command": "ragAssistant.newChat",
+        "title": "Autopilot: New Chat"
+      },
+      {
+        "command": "ragAssistant.openSettings",
+        "title": "Autopilot: Open Settings"
+      },
+      {
+        "command": "ragAssistant.indexWorkspace",
+        "title": "Autopilot: Index Workspace (BM25)"
+      },
+      {
+        "command": "ragAssistant.reloadMCP",
+        "title": "Autopilot: Reload MCP Servers"
+      },
+      {
+        "command": "ragAssistant.setGithubToken",
+        "title": "Autopilot: Set GitHub Token (Research)"
+      },
+      {
+        "command": "ragAssistant.setBrightDataKey",
+        "title": "Autopilot: Set Bright Data API Key (Google search for Research)"
+      },
+      {
+        "command": "ragAssistant.setOpenRouterKey",
+        "title": "Autopilot: Set OpenRouter API Key"
+      },
+      {
+        "command": "ragAssistant.review.acceptAll",
+        "title": "Autopilot: Accept all changes in this file"
+      },
+      {
+        "command": "ragAssistant.review.revertAll",
+        "title": "Autopilot: Revert all changes in this file"
+      }
+    ],
+    "configuration": {
+      "title": "Autopilot",
+      "properties": {
+        "ragAssistant.models": {
+          "type": "array",
+          "default": [
+            {
+              "id": "ollama-cloud-gemma4",
+              "name": "Gemma 4 31B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "gemma4:31b-cloud",
+              "description": "Understands screenshots and images"
+            },
+            {
+              "id": "ollama-cloud-gpt-oss",
+              "name": "GPT-OSS 120B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "gpt-oss:120b-cloud",
+              "description": "Strong reasoning for complex tasks",
+              "family": "GPT-OSS",
+              "variant": "120B"
+            },
+            {
+              "id": "ollama-cloud-beam",
+              "name": "Beam 550B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "beam",
+              "description": "Largest model for the toughest challenges"
+            },
+            {
+              "id": "ollama-cloud-nemotron-super",
+              "name": "Nemotron 3 Super 120B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "nemotron-3-super:cloud",
+              "description": "Balanced reasoning and tool use",
+              "family": "Nemotron 3",
+              "variant": "Super 120B"
+            },
+            {
+              "id": "ollama-cloud-nemotron-ultra",
+              "name": "Nemotron 3 Ultra 550B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "nemotron-3-ultra:cloud",
+              "description": "Most capable Nemotron for complex work",
+              "family": "Nemotron 3",
+              "variant": "Ultra 550B"
+            },
+            {
+              "id": "ollama-cloud-nemotron-nano",
+              "name": "Nemotron 3 Nano 30B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "nemotron-3-nano:30b-cloud",
+              "description": "Light and fast for simpler tasks",
+              "family": "Nemotron 3",
+              "variant": "Nano 30B"
+            },
+            {
+              "id": "ollama-cloud-gpt-oss-20b",
+              "name": "GPT-OSS 20B",
+              "provider": "ollama",
+              "baseUrl": "https://ollama.com",
+              "modelId": "gpt-oss:20b-cloud",
+              "description": "Fastest for quick answers",
+              "family": "GPT-OSS",
+              "variant": "20B"
+            },
+            {
+              "id": "openrouter-nemotron-35-super-vl",
+              "name": "Nemotron 3.5 SuperVL 120B",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "nvidia/nemotron-3.5-super-vl:free",
+              "description": "Reads images and reasons well",
+              "family": "Nemotron 3.5",
+              "variant": "SuperVL 120B"
+            },
+            {
+              "id": "openrouter-xing-40",
+              "name": "Xing 4.0 29B",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "xingchen-agi/xing4.0-29b-a4b:free",
+              "description": "Fast general model"
+            },
+            {
+              "id": "openrouter-nemotron-35-lightning",
+              "name": "Nemotron 3.5 Lightning 30B",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "nvidia/nemotron-3.5-lightning:free",
+              "description": "Light and fast for simpler tasks",
+              "family": "Nemotron 3.5",
+              "variant": "Lightning 30B"
+            },
+            {
+              "id": "openrouter-gemma4-26b",
+              "name": "Gemma 4 26B",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "google/gemma-4-26b-a4b-it:free",
+              "description": "Understands images and audio",
+              "audio": true
+            },
+            {
+              "id": "openrouter-inkling-975b",
+              "name": "Inkling 975B",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "thinkingmachines/inkling:free",
+              "description": "Largest Inkling for the toughest challenges",
+              "family": "Inkling",
+              "variant": "975B"
+            },
+            {
+              "id": "openrouter-inkling-276b",
+              "name": "Inkling 276B",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "thinkingmachines/inkling-small:free",
+              "description": "Smaller Inkling, quicker answers",
+              "family": "Inkling",
+              "variant": "276B"
+            },
+            {
+              "id": "ollama-local",
+              "name": "Ollama (local)",
+              "provider": "ollama",
+              "baseUrl": "http://localhost:11434",
+              "modelId": "llama3.2"
+            },
+            {
+              "id": "openai-gpt4o",
+              "name": "GPT-4o (OpenAI)",
+              "provider": "openai",
+              "baseUrl": "https://api.openai.com",
+              "modelId": "gpt-4o"
+            },
+            {
+              "id": "openai-gpt4o-mini",
+              "name": "GPT-4o Mini (OpenAI)",
+              "provider": "openai",
+              "baseUrl": "https://api.openai.com",
+              "modelId": "gpt-4o-mini"
+            },
+            {
+              "id": "gemini-25-flash",
+              "name": "Gemini 2.5 Flash (Google)",
+              "provider": "gemini",
+              "baseUrl": "https://generativelanguage.googleapis.com",
+              "modelId": "gemini-2.5-flash"
+            },
+            {
+              "id": "gemini-25-pro",
+              "name": "Gemini 2.5 Pro (Google)",
+              "provider": "gemini",
+              "baseUrl": "https://generativelanguage.googleapis.com",
+              "modelId": "gemini-2.5-pro"
+            },
+            {
+              "id": "claude-sonnet",
+              "name": "Claude Sonnet 4.5 (OpenRouter)",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "anthropic/claude-sonnet-4-5"
+            },
+            {
+              "id": "deepseek-r1",
+              "name": "DeepSeek R1 (OpenRouter)",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "deepseek/deepseek-r1"
+            },
+            {
+              "id": "deepseek-v3",
+              "name": "DeepSeek V3 (OpenRouter)",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "deepseek/deepseek-chat-v3-0324"
+            },
+            {
+              "id": "llama4-maverick",
+              "name": "Llama 4 Maverick (OpenRouter)",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "meta-llama/llama-4-maverick"
+            },
+            {
+              "id": "qwq-32b",
+              "name": "QwQ 32B (OpenRouter)",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "qwen/qwq-32b"
+            },
+            {
+              "id": "mistral-large",
+              "name": "Mistral Large (OpenRouter)",
+              "provider": "openrouter",
+              "baseUrl": "https://openrouter.ai/api",
+              "modelId": "mistralai/mistral-large-2411"
+            },
+            {
+              "id": "ollama-llama32-vision",
+              "name": "Llama 3.2 Vision (Ollama local)",
+              "provider": "ollama",
+              "baseUrl": "http://localhost:11434",
+              "modelId": "llama3.2-vision"
+            },
+            {
+              "id": "ollama-codestral",
+              "name": "Codestral (Ollama local)",
+              "provider": "ollama",
+              "baseUrl": "http://localhost:11434",
+              "modelId": "codestral"
+            }
+          ],
+          "description": "Configured AI models. API keys are stored in VS Code's secure secret storage.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "provider",
+              "baseUrl",
+              "modelId"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "ollama",
+                  "openai",
+                  "gemini",
+                  "openrouter",
+                  "custom"
+                ]
+              },
+              "baseUrl": {
+                "type": "string",
+                "description": "REST API base URL"
+              },
+              "modelId": {
+                "type": "string",
+                "description": "Model identifier used in API requests"
+              },
+              "description": {
+                "type": "string",
+                "description": "Short subtitle shown in the model picker"
+              },
+              "audio": {
+                "type": "boolean",
+                "description": "The model accepts voice messages (audio) directly"
+              },
+              "family": {
+                "type": "string",
+                "description": "Models with the same family and provider share one row in the model picker, with a slider for the variant"
+              },
+              "variant": {
+                "type": "string",
+                "description": "Variant label shown beside the slider, e.g. 'Super 120B'"
+              }
+            }
+          }
+        },
+        "ragAssistant.activeModelId": {
+          "type": "string",
+          "default": "ollama-cloud-gemma4",
+          "description": "ID of the currently active model"
+        },
+        "ragAssistant.visionModelId": {
+          "type": "string",
+          "default": "ollama-cloud-gemma4",
+          "description": "Model that analyzes attached images. Its description is passed to the active model, which still writes the reply."
+        },
+        "ragAssistant.systemPrompt": {
+          "type": "string",
+          "default": "You are a helpful AI coding assistant with deep knowledge of software engineering.\n\nWhen your response includes file contents, ALWAYS use this exact format for EVERY file:\n\n### FILE: relative/path/to/file.ext\n```language\nfile content here\n```\n\nRules:\n- Use relative paths from project root (e.g. css/style.css, not /css/style.css)\n- Every file must have its own ### FILE: header\n- Put ALL files in the response, complete and ready to use\n- After the files, you may add brief explanations\n\nThis format allows the editor to auto-create the files.",
+          "editPresentation": "multilineText",
+          "description": "System prompt prepended to every conversation"
+        },
+        "ragAssistant.maxTokens": {
+          "type": "number",
+          "default": 8192,
+          "description": "Maximum output tokens per response"
+        },
+        "ragAssistant.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Model temperature (0 = deterministic, 2 = very creative)"
+        },
+        "ragAssistant.contextWindow": {
+          "type": "number",
+          "default": 24000,
+          "description": "Estimated token budget for context window. History is auto-truncated to fit."
+        },
+        "ragAssistant.policyGuardianEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable PolicyGuardian security checks on shell commands"
+        },
+        "ragAssistant.ragTopK": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Number of RAG chunks to retrieve per query"
+        },
+        "ragAssistant.agentRole": {
+          "type": "string",
+          "default": "default",
+          "enum": [
+            "default",
+            "architect",
+            "developer",
+            "reviewer",
+            "tester",
+            "docwriter",
+            "security",
+            "refactor",
+            "optimizer",
+            "debugger",
+            "designer",
+            "manager"
+          ],
+          "description": "Default agent role for new conversations"
+        },
+        "ragAssistant.brightDataZone": {
+          "type": "string",
+          "default": "",
+          "description": "Bright Data SERP API zone name, used with the Bright Data API key for real Google results in Research mode. Empty = DuckDuckGo fallback."
+        },
+        "ragAssistant.audioModelId": {
+          "type": "string",
+          "default": "openrouter-gemma4-26b",
+          "description": "Model that listens to voice messages when the selected model cannot hear audio"
+        },
+        "ragAssistant.openRouterAppUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL that identifies this app to OpenRouter (HTTP-Referer). Some free models only serve apps OpenRouter recognises as agentic. Default: http://localhost"
+        },
+        "ragAssistant.openRouterCategories": {
+          "type": "string",
+          "default": "",
+          "description": "OpenRouter app categories sent with every request (max 2, comma separated, e.g. ide-extension,cli-agent). OpenRouter's agent-only free models check them. Default: ide-extension,cli-agent"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "ragAssistant.review.nextHunk",
+        "key": "alt+j",
+        "when": "editorTextFocus && ragAssistant.hasReview"
+      },
+      {
+        "command": "ragAssistant.review.prevHunk",
+        "key": "alt+k",
+        "when": "editorTextFocus && ragAssistant.hasReview"
+      },
+      {
+        "command": "ragAssistant.review.acceptHere",
+        "key": "alt+enter",
+        "when": "editorTextFocus && ragAssistant.hasReview"
+      },
+      {
+        "command": "ragAssistant.review.revertHere",
+        "key": "alt+shift+backspace",
+        "when": "editorTextFocus && ragAssistant.hasReview"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

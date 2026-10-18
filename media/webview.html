@@ -1,0 +1,2010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data: blob:;">
+<title>Autopilot</title>
+<style>
+/* ── Design tokens ──────────────────────────────────────────────── */
+:root {
+  --bg:   #1a1a1a;
+  --bg2:  #242424;
+  --bg3:  #2e2e2e;
+  --bg4:  #383838;
+  --bd:   #3a3a3a;
+  --bd2:  #4a4a4a;
+  --fg:   #e8e8e8;
+  --fg2:  #a0a0a0;
+  --fg3:  #606060;
+  --acc:  #e06c35;   /* Claude Code orange */
+  --grn:  #3fb950;
+  --red:  #f85149;
+  --cyn:  #79c0ff;
+  --pur:  #bc8cff;
+  --yel:  #d29922;
+  --dot-done:    #3fb950;
+  --dot-pending: #606060;
+  --dot-err:     #f85149;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,'Segoe UI',system-ui,sans-serif;font-size:13px;line-height:1.6}
+body{display:flex;flex-direction:column;overflow:hidden}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:2px}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.header{
+  background:var(--bg2);border-bottom:1px solid var(--bd);
+  padding:8px 12px;display:flex;align-items:center;gap:8px;flex-shrink:0;
+}
+.logo{
+  font-size:12px;font-weight:700;color:var(--acc);
+  letter-spacing:.06em;flex-shrink:0;
+}
+.title{font-size:12px;color:var(--fg2);flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.model-wrap{position:relative;min-width:0}
+select{
+  background:var(--bg3);border:1px solid var(--bd);color:var(--fg);
+  font-size:11px;padding:3px 22px 3px 7px;border-radius:5px;
+  cursor:pointer;appearance:none;max-width:140px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+select:focus{outline:1px solid var(--acc)}
+.model-wrap::after{
+  content:'▾';position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  color:var(--fg3);pointer-events:none;font-size:9px
+}
+.hbtn{
+  background:none;border:none;color:var(--fg2);width:28px;height:28px;padding:0;
+  cursor:pointer;border-radius:7px;flex-shrink:0;
+  display:inline-flex;align-items:center;justify-content:center;
+}
+.hbtn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.hbtn:hover{color:var(--fg);background:var(--bg4)}
+.hbtn.on{color:var(--acc)}
+.hbtn.on svg{fill:currentColor}
+.header{position:relative;gap:4px;padding:6px 10px 6px 14px}
+.chat-title{
+  flex:1;min-width:0;font-size:13px;font-weight:600;color:var(--fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
+/* Session history / bookmarks dropdown */
+.session-panel{
+  display:none;position:absolute;top:100%;left:0;right:0;z-index:20;
+  background:var(--bg2);border:1px solid var(--bd2);border-top:none;
+  border-radius:0 0 10px 10px;box-shadow:0 8px 24px rgba(0,0,0,.45);
+  max-height:60vh;overflow-y:auto;padding:4px;
+}
+.session-panel.show{display:block}
+.sp-head{padding:6px 8px 4px;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--fg3);text-transform:uppercase}
+.sp-action{
+  display:flex;align-items:center;gap:8px;width:100%;padding:7px 8px;margin-bottom:2px;
+  background:var(--bg3);border:none;border-radius:6px;color:var(--fg);font-size:12px;cursor:pointer;text-align:left;
+}
+.sp-action:hover{background:var(--bg4)}
+.sp-action svg{width:15px;height:15px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sp-action.on svg{fill:var(--acc);stroke:var(--acc)}
+.sp-empty{padding:14px 8px;font-size:12px;color:var(--fg3);text-align:center}
+.sp-item{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;cursor:pointer}
+.sp-item:hover{background:var(--bg3)}
+.sp-item.cur{background:var(--bg3);box-shadow:inset 2px 0 0 var(--acc)}
+.sp-main{flex:1;min-width:0}
+.sp-title{font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sp-meta{font-size:10px;color:var(--fg3)}
+.sp-btn{
+  background:none;border:none;color:var(--fg3);width:22px;height:22px;border-radius:5px;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px;line-height:1;
+}
+.sp-btn:hover{background:var(--bg4);color:var(--fg)}
+.sp-btn.on{color:var(--acc)}
+.sp-btn.danger{color:var(--red)}
+.sp-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sp-btn.on svg{fill:currentColor}
+
+/* ── Status bar ─────────────────────────────────────────────────── */
+.statusbar{
+  background:var(--bg2);border-bottom:1px solid var(--bd);
+  padding:3px 12px;display:flex;gap:8px;align-items:center;
+  font-size:10px;flex-shrink:0;flex-wrap:wrap;
+}
+.sb-pill{
+  display:inline-flex;align-items:center;gap:3px;
+  padding:1px 7px;border-radius:10px;border:1px solid var(--bd2);
+  color:var(--fg3);cursor:pointer;font-size:10px;transition:all .15s;
+}
+.sb-pill:hover{border-color:var(--acc);color:var(--acc)}
+.sb-pill.on{border-color:var(--grn);color:var(--grn)}
+.sb-pill.warn{border-color:var(--yel);color:var(--yel)}
+.sb-pill.err{border-color:var(--red);color:var(--red)}
+.sb-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+
+/* ── Chat list ──────────────────────────────────────────────────── */
+.chat{
+  flex:1;overflow-y:auto;padding:0 0 12px;
+  display:flex;flex-direction:column;
+  scrollbar-width:thin;scrollbar-color:var(--bg4) transparent;
+}
+
+/* Empty state */
+.empty{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;
+  color:var(--fg3);text-align:center;padding:24px;
+}
+.empty-icon{width:72px;height:72px;margin-bottom:4px}
+.empty-icon svg{width:100%;height:100%;display:block}
+.empty h3{font-size:13px;font-weight:600;color:var(--fg2)}
+.empty p{font-size:11px;line-height:1.7;max-width:220px}
+.empty kbd{
+  background:var(--bg3);border:1px solid var(--bd2);border-radius:3px;
+  padding:0 4px;font-size:10px;font-family:monospace;color:var(--fg2);
+}
+
+/* ── Message row ────────────────────────────────────────────────── */
+.msg-row{
+  display:flex;gap:0;align-items:stretch;
+  padding:0 14px 0 12px;position:relative;
+}
+.msg-row:hover{background:rgba(255,255,255,.02)}
+
+/* One turn = sticky user card + the replies it triggered */
+.turn{position:relative;flex-shrink:0}
+.user-row{position:sticky;top:0;z-index:6;background:var(--bg);padding:8px 10px 15px}
+.user-time{font-size:10px;color:var(--fg3);text-align:right;margin:0 2px 3px}
+.user-card{
+  background:var(--bg3);border:1px solid var(--bd2);border-radius:10px;
+  padding:8px 12px;font-size:13px;line-height:1.55;color:var(--fg);
+  white-space:pre-wrap;word-break:break-word;box-shadow:0 8px 12px -10px rgba(0,0,0,.7);
+}
+.user-card{position:relative}
+.user-time{margin-right:30px}
+.user-restore{
+  position:absolute;bottom:-13px;right:8px;width:24px;height:24px;border-radius:50%;
+  background:var(--bg2);border:1px solid var(--bd2);color:var(--fg2);cursor:pointer;padding:0;
+  display:inline-flex;align-items:center;justify-content:center;opacity:.75;
+}
+.user-restore:hover{opacity:1;color:var(--fg);background:var(--bg4)}
+.user-restore svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.user-text{overflow-wrap:anywhere}
+.user-text.clamped{
+  max-height:7.8em;overflow:hidden;
+  -webkit-mask-image:linear-gradient(#000 62%,transparent);mask-image:linear-gradient(#000 62%,transparent);
+}
+.user-more{
+  display:none;margin-top:6px;padding:0;background:none;border:none;color:var(--fg2);
+  font-family:inherit;font-size:12px;cursor:pointer;
+}
+.user-more:hover{color:var(--fg);text-decoration:underline}
+.user-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.user-chip{
+  display:inline-flex;align-items:center;gap:7px;padding:3px 9px 3px 5px;max-width:100%;
+  background:var(--bg4);border:1px solid var(--bd2);border-radius:7px;font-size:12px;color:var(--fg);
+}
+.user-chip b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip-thumb{width:20px;height:20px;border-radius:4px;object-fit:cover;flex-shrink:0}
+.chip-dim{color:var(--fg3);font-size:11px;flex-shrink:0}
+.turn-body{padding:2px 0 8px}
+
+/* Left rail: a vertical line runs through every dot of a turn, connecting the replies */
+.msg-gutter{
+  width:24px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;
+}
+.msg-gutter::before{content:'';width:1px;height:9px;background:var(--bd2);flex-shrink:0}
+.msg-gutter::after{content:'';width:1px;flex:1;background:var(--bd2)}
+.turn-body .msg-row:first-child .msg-gutter::before{background:transparent}
+.turn-body .msg-row:last-child .msg-gutter::after{display:none}
+.msg-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  border:2px solid var(--dot-pending);background:transparent;
+}
+.msg-dot.done{border-color:var(--dot-done);background:var(--dot-done)}
+.msg-dot.user{border-color:var(--acc);background:var(--acc)}
+.msg-dot.err{border-color:var(--dot-err)}
+.msg-dot.tool{border-color:var(--pur);background:transparent}
+.msg-dot.system{border-color:var(--fg3);background:var(--fg3)}
+
+/* Right: header + content */
+.msg-body{flex:1;min-width:0;padding:4px 0 12px 6px}
+.msg-head{
+  display:flex;align-items:baseline;gap:8px;margin-bottom:2px;
+}
+.msg-head .msg-ts{margin-left:auto}
+.msg-author.asst{display:none}
+.msg-author{
+  font-size:11px;font-weight:600;color:var(--fg2);
+}
+.msg-author.user{color:var(--acc)}
+.msg-author.asst{color:var(--cyn)}
+.msg-author.err{color:var(--red)}
+.msg-author.tool-name{color:var(--pur);font-family:monospace}
+.msg-author.system{color:var(--fg3)}
+.msg-ts{font-size:10px;color:var(--fg3)}
+.msg-model-tag{
+  font-size:9px;color:var(--fg3);background:var(--bg3);
+  border:1px solid var(--bd);border-radius:3px;padding:0 4px;
+}
+
+/* Content areas */
+.msg-content{font-size:13px;line-height:1.65;color:var(--fg);word-break:break-word}
+.msg-content.user-text{white-space:pre-wrap}
+
+/* Markdown styles inside .msg-content */
+.msg-content p{margin-bottom:6px}
+.msg-content p:last-child{margin-bottom:0}
+.msg-content pre{
+  background:var(--bg2);border:1px solid var(--bd);border-radius:6px;
+  padding:10px 12px;overflow-x:auto;margin:8px 0;
+  font-family:'Consolas','JetBrains Mono',monospace;font-size:12px;line-height:1.5;
+}
+.msg-content code{
+  background:rgba(255,255,255,.07);border-radius:3px;
+  padding:1px 5px;font-family:'Consolas','JetBrains Mono',monospace;
+  font-size:12px;color:var(--cyn);
+}
+.msg-content pre code{background:none;padding:0;color:var(--fg)}
+.msg-content ul,.msg-content ol{margin:5px 0 5px 18px}
+.msg-content li{margin-bottom:2px}
+.msg-content strong{color:var(--fg);font-weight:600}
+.msg-content em{color:var(--fg2);font-style:italic}
+.msg-content h1,.msg-content h2,.msg-content h3{
+  font-weight:600;color:var(--fg);margin:10px 0 4px;line-height:1.3;
+}
+.msg-content h1{font-size:15px}
+.msg-content h2{font-size:14px}
+.msg-content h3{font-size:13px}
+.msg-content hr{border:none;border-top:1px solid var(--bd);margin:8px 0}
+.msg-content a{color:var(--acc);text-decoration:none}
+.msg-content a:hover{text-decoration:underline}
+.msg-content table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12px}
+.msg-content th,.msg-content td{border:1px solid var(--bd);padding:4px 8px;text-align:left}
+.msg-content th{background:var(--bg3);color:var(--fg2);font-weight:600}
+.msg-content tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+.msg-content blockquote{
+  border-left:3px solid var(--bd2);padding-left:12px;
+  color:var(--fg2);margin:6px 0;font-style:italic;
+}
+
+/* Tool call row */
+.tool-call-row{
+  display:flex;align-items:flex-start;gap:8px;
+  font-family:'Consolas','JetBrains Mono',monospace;font-size:11px;
+}
+.tool-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  background:rgba(188,140,255,.08);border:1px solid rgba(188,140,255,.25);
+  border-radius:4px;padding:2px 8px;color:var(--pur);
+  font-size:11px;cursor:default;white-space:nowrap;
+}
+.tool-args{color:var(--fg3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tool-result{
+  margin-top:4px;background:var(--bg2);border:1px solid var(--bd);
+  border-left:2px solid var(--grn);border-radius:4px;
+  padding:6px 10px;font-size:11px;color:var(--fg2);
+  white-space:pre-wrap;max-height:120px;overflow-y:auto;word-break:break-all;
+}
+.tool-result.fail{border-left-color:var(--red);color:var(--red)}
+
+/* Streaming cursor */
+@keyframes blink{50%{opacity:0}}
+.cursor{
+  display:inline-block;width:2px;height:13px;background:var(--acc);
+  margin-left:1px;vertical-align:text-bottom;
+  animation:blink 1s steps(1) infinite;
+}
+
+/* Battle mode */
+.battle-wrap{
+  display:none;flex-direction:row;gap:8px;
+  padding:0 12px 8px;
+}
+.battle-wrap.show{display:flex}
+.battle-col{
+  flex:1;min-width:0;background:var(--bg2);border:1px solid var(--bd);
+  border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;
+}
+.battle-title{
+  font-size:10px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.07em;color:var(--fg3);padding-bottom:5px;
+  border-bottom:1px solid var(--bd);
+}
+.battle-body{font-size:12px;line-height:1.55;min-height:40px;overflow-y:auto;max-height:260px;word-break:break-word}
+.battle-col.winner{border-color:var(--grn)}
+.battle-vote button{
+  width:100%;background:var(--bg3);border:1px solid var(--bd);
+  color:var(--fg3);font-size:11px;padding:5px;border-radius:4px;cursor:pointer;margin-top:6px;
+}
+.battle-vote button:hover{border-color:var(--grn);color:var(--grn)}
+
+
+/* Pinned context panel */
+.pin-panel{
+  display:none;margin:0 12px 8px;padding:8px 12px;
+  background:var(--bg2);border:1px solid rgba(188,140,255,.35);border-radius:8px;
+}
+.pin-panel.show{display:block}
+.pin-panel-title{
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:11px;font-weight:700;color:var(--pur);margin-bottom:6px;
+}
+.pin-item{
+  display:flex;align-items:center;gap:6px;
+  font-size:11px;font-family:monospace;color:var(--fg2);
+  padding:3px 6px;background:var(--bg3);border-radius:3px;margin-bottom:3px;
+}
+.pin-item-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pin-remove{cursor:pointer;color:var(--fg3);font-size:10px;padding:0 3px;border:none;background:none;color:var(--acc)}
+
+/* File panel */
+.file-panel{
+  display:none;margin:0 12px 8px;padding:10px 12px;
+  background:var(--bg2);border:1px solid rgba(63,185,80,.4);border-radius:8px;
+}
+.file-panel.show{display:block}
+.file-panel-title{font-size:11px;font-weight:700;color:var(--grn);margin-bottom:7px}
+.file-item{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;font-family:monospace;color:var(--fg2);
+  padding:3px 6px;background:var(--bg3);border-radius:3px;margin-bottom:3px;
+}
+.file-size{color:var(--fg3);font-size:10px}
+.file-actions{display:flex;gap:6px;margin-top:8px}
+.btn-create{
+  flex:1;background:var(--grn);color:#0d1117;border:none;
+  font-size:12px;font-weight:700;padding:5px 12px;border-radius:5px;cursor:pointer;
+}
+.btn-create:hover{background:#56d364}
+.btn-discard{
+  background:none;border:1px solid var(--bd);color:var(--fg3);
+  font-size:12px;padding:5px 10px;border-radius:5px;cursor:pointer;
+}
+.btn-discard:hover{color:var(--red);border-color:var(--red)}
+
+/* ── Input area ─────────────────────────────────────────────────── */
+.input-area{
+  background:var(--bg);padding:6px 10px 10px;flex-shrink:0;
+}
+.img-strip{display:none;gap:5px;flex-wrap:wrap;margin-bottom:6px}
+.img-strip.show{display:flex}
+/* Composer card: textarea + mic on top, toolbar below */
+.composer{
+  position:relative;background:var(--bg2);border:1px solid var(--bd2);
+  border-radius:14px;padding:8px 12px 8px 12px;
+  display:flex;flex-direction:column;gap:4px;
+}
+.composer:focus-within{border-color:var(--acc)}
+.comp-top{display:flex;align-items:flex-start;gap:6px}
+.comp-bar{display:flex;align-items:center;gap:6px;min-width:0}
+.grow{flex:1}
+/* Slash-command popover: same look as the model / mode / "+" menus */
+.slash-menu{
+  position:absolute;bottom:100%;left:0;right:0;margin-bottom:6px;z-index:15;
+  background:var(--bg2);border:1px solid var(--bd2);border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,.5);padding:6px;
+  display:none;max-height:min(60vh,420px);overflow-y:auto;
+}
+.slash-menu.show{display:block}
+.slash-item{display:block;padding:7px 10px;border-radius:8px;cursor:pointer}
+.slash-item:hover{background:var(--bg3)}
+.slash-item.active{background:rgba(224,108,53,.18)}
+.slash-item .scmd{display:block;color:var(--fg);font-size:13px;font-weight:500;font-family:inherit}
+.slash-item .sdesc{display:block;color:var(--fg3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+textarea{
+  flex:1;min-width:0;background:transparent;border:none;outline:none;
+  color:var(--fg);font-family:inherit;font-size:13px;
+  line-height:1.5;padding:4px 0;
+  resize:none;min-height:26px;max-height:140px;overflow-y:auto;display:block;
+}
+textarea::placeholder{color:var(--fg3)}
+textarea:disabled{opacity:.5;cursor:not-allowed}
+.ic-btn{
+  background:none;border:none;color:var(--fg2);width:28px;height:28px;padding:0;
+  border-radius:8px;display:inline-flex;align-items:center;justify-content:center;
+  cursor:pointer;flex-shrink:0;font-size:16px;line-height:1;
+}
+.ic-btn:hover{background:var(--bg4);color:var(--fg)}
+.ic-btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.ic-btn.bright{color:var(--fg)}
+.ic-btn.bright svg{width:17px;height:17px;stroke-width:1.7}
+.ic-btn.rec{background:var(--red);color:#fff;animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.55}}
+/* Every control in the bottom bar is 28px tall and vertically centered.
+   The model pill is the only flexible item: it shrinks (with ellipsis) but never below 72px. */
+.model-pill{
+  display:inline-flex;align-items:center;justify-content:space-between;gap:6px;height:28px;padding:0 10px;
+  background:var(--bg3);border:none;border-radius:14px;color:var(--fg2);font-family:inherit;
+  font-size:11px;line-height:1;cursor:pointer;flex:0 1 auto;min-width:56px;max-width:200px;
+}
+.model-pill:hover,.model-pill.open{background:var(--bg4);color:var(--fg)}
+.model-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.model-caret{font-size:9px;color:var(--fg3);flex-shrink:0}
+
+/* Model picker popover */
+.model-menu{
+  display:none;position:absolute;left:0;right:0;bottom:100%;margin-bottom:6px;z-index:15;
+  background:var(--bg2);border:1px solid var(--bd2);border-radius:12px;
+  box-shadow:0 10px 28px rgba(0,0,0,.5);padding:6px;max-height:min(60vh,420px);overflow-y:auto;
+}
+.model-menu.show{display:block}
+.mm-title{padding:4px 10px 6px;font-size:12px;color:var(--fg3)}
+.mm-item{
+  display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;
+}
+.mm-item:hover{background:var(--bg3)}
+.mm-item.focus{background:rgba(224,108,53,.18)}
+.mm-text{flex:1;min-width:0}
+.mm-name{font-size:13px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mm-desc{font-size:11px;color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mm-check{color:var(--fg2);font-size:14px;flex-shrink:0;width:16px;text-align:center}
+.mm-sep{height:1px;background:var(--bd);margin:5px 4px}
+.mm-act{font-size:12px;color:var(--fg2)}
+.mm-var{font-size:11px;color:var(--fg2);white-space:nowrap;flex-shrink:0}
+.vslider{position:relative;flex-shrink:0;width:60px;height:14px;border-radius:7px;background:var(--bg4);cursor:pointer;touch-action:none;--f:0}
+.vs-fill{position:absolute;left:0;top:0;bottom:0;border-radius:7px;background:#2f6fd6;width:calc((100% - 14px) * var(--f) + 7px)}
+.vs-thumb{position:absolute;top:0;width:14px;height:14px;border-radius:50%;background:#e8e8e8;box-shadow:0 0 0 1px rgba(0,0,0,.35);left:calc((100% - 14px) * var(--f))}
+.vslider:hover .vs-thumb{background:#fff}
+.plus-menu{right:auto;width:240px;max-height:none;overflow:visible}
+.plus-menu .mm-item{padding:9px 10px}
+.plus-menu .mm-name{font-size:13px}
+#btnPlus.open{background:var(--bg4);color:var(--fg)}
+.mm-title{display:flex;justify-content:space-between;align-items:center}
+.mm-title kbd{background:var(--bg3);border:1px solid var(--bd2);border-radius:4px;padding:0 5px;font-size:10px;font-family:inherit;color:var(--fg2)}
+.mm-ico{width:20px;height:20px;flex-shrink:0;color:var(--fg2);display:inline-flex;align-items:center;justify-content:center}
+.mm-ico svg,.mode-ico svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.mode-pill{
+  display:inline-flex;align-items:center;gap:5px;height:28px;padding:0 8px;background:none;border:none;
+  border-radius:8px;color:var(--fg2);font-family:inherit;font-size:12px;line-height:1;cursor:pointer;flex-shrink:0;
+}
+.mode-pill:hover,.mode-pill.open{background:var(--bg3);color:var(--fg)}
+.mode-ico{width:15px;height:15px;display:inline-flex}
+/* Narrow panels: drop the "/" button first (commands can still be typed), keep the mode name visible,
+   and only in very narrow panels collapse the mode pill to its icon so Send never gets pushed out */
+@media (max-width:330px){ .comp-bar .ic-btn[title="Commands"]{display:none} }
+@media (max-width:240px){ .mode-pill #modeLabel{display:none} .mode-pill{padding:0 6px} }
+.btn-send{
+  width:28px;height:28px;padding:0;border-radius:8px;border:none;background:var(--acc);color:#fff;
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  flex-shrink:0;font-size:15px;font-weight:700;line-height:1;
+}
+.comp-bar .spinner{flex-shrink:0}
+.btn-send:hover{opacity:.9}
+.btn-send.stop{background:var(--red)}
+.btn-send:disabled{opacity:.4;cursor:not-allowed}
+.hint{display:none}
+/* Highlighted @file chips inside the input: the textarea text is transparent and a mirror layer draws it */
+.inp-wrap{position:relative;flex:1;min-width:0}
+.inp-mirror,
+.inp-wrap textarea{
+  font-family:inherit;font-size:13px;line-height:1.5;padding:4px 0;letter-spacing:normal;
+  white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;
+}
+.inp-mirror{position:absolute;inset:0;overflow:hidden;pointer-events:none;color:var(--fg)}
+.inp-wrap textarea{position:relative;width:100%;color:transparent;caret-color:var(--fg);scrollbar-width:none}
+.inp-wrap textarea::-webkit-scrollbar{display:none}
+.inp-wrap textarea::selection{background:rgba(56,139,253,.4);color:transparent}
+.inp-wrap textarea::placeholder{color:var(--fg3)}
+.fc-card{margin:2px 10px 8px 28px;display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--bg2);border:1px solid var(--bd2);border-radius:8px;font-size:12px;min-width:0}
+.fc-card.resolved{opacity:.65}
+.fc-ico{color:var(--fg2);flex-shrink:0}
+.fc-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg);cursor:pointer}
+.fc-name:hover{text-decoration:underline}
+.fc-stat{display:flex;gap:6px;flex-shrink:0;font-size:11px}
+.fc-add{color:#3fb950;font-weight:600}
+.fc-del{color:#f85149;font-weight:600}
+.fc-actions{display:flex;gap:6px;flex-shrink:0}
+.fc-actions button{background:var(--bg3);border:1px solid var(--bd2);border-radius:10px;color:var(--fg2);font-size:10px;padding:1px 8px;cursor:pointer;font-family:inherit}
+.fc-actions button:hover{color:var(--fg);background:var(--bg4)}
+.fc-actions button[data-a="accept"]:hover{color:#3fb950;border-color:#3fb950}
+.fc-actions button[data-a="revert"]:hover{color:#f85149;border-color:#f85149}
+.fc-done{flex-shrink:0;font-size:11px;color:var(--fg3)}
+.queue-note{margin:2px 10px 8px 28px;display:flex;align-items:center;gap:10px;font-size:11px;color:var(--fg3)}
+.queue-note button{background:var(--bg3);border:1px solid var(--bd2);border-radius:10px;color:var(--fg2);font-size:10px;padding:1px 8px;cursor:pointer;font-family:inherit}
+.queue-note button:hover{color:var(--fg);background:var(--bg4)}
+.queue-note.cancelled{color:var(--fg3);opacity:.7}
+.mt{color:#79b8ff;background:rgba(56,139,253,.2);border-radius:4px;box-shadow:0 0 0 2px rgba(56,139,253,.2)}
+
+/* @file mention list: icon, name, parent folder on the right */
+#mentionMenu{padding:4px;border-radius:10px}
+.mn-item{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg)}
+.mn-item:hover{background:var(--bg3)}
+.mn-item.active{background:#04395e}
+.mn-ico{width:18px;height:18px;flex-shrink:0;color:var(--fg2);display:inline-flex}
+.mn-ico svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.mn-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mn-dir{color:var(--fg3);font-size:12px;flex-shrink:0;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Choice card (permission / plan approval) */
+.perm{background:var(--bg2);border:1px solid var(--bd2);border-radius:12px;padding:12px 12px 10px;margin:4px 0 2px}
+.perm.sent{opacity:.6;pointer-events:none}
+.perm.resolved{background:none;border-color:var(--bd);padding:7px 12px}
+.perm-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--fg);margin-bottom:10px}
+.perm-ico{width:16px;height:16px;color:var(--fg2);display:inline-flex;flex-shrink:0}
+.perm-ico svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.perm-detail{
+  background:var(--bg);border-radius:8px;padding:8px 10px;margin-bottom:10px;max-height:140px;overflow:auto;
+  font-family:'Consolas','JetBrains Mono',monospace;font-size:12px;color:var(--fg);white-space:pre-wrap;word-break:break-all;
+}
+.perm-opt{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer;color:var(--fg2);font-size:13px}
+.perm-opt:hover{background:var(--bg3)}
+.perm-opt.sel{background:var(--bg4);color:var(--fg)}
+.perm-num{
+  width:18px;height:18px;border-radius:5px;background:var(--bg3);color:var(--fg2);flex-shrink:0;
+  display:inline-flex;align-items:center;justify-content:center;font-size:11px;
+}
+.perm-opt.sel .perm-num{background:var(--bg2);color:var(--fg)}
+.perm-hint{color:var(--fg3)}
+.perm-fbrow{padding:2px 10px 6px 38px}
+.perm-fb{
+  width:100%;background:var(--bg);border:1px solid var(--bd2);border-radius:7px;color:var(--fg);
+  font-family:inherit;font-size:12px;padding:6px 9px;outline:none;
+}
+.perm-fb:focus{border-color:#2f81f7}
+.perm-foot{display:flex;align-items:center;gap:12px;margin-top:8px}
+.perm-link{background:none;border:none;color:var(--fg2);font-family:inherit;font-size:12px;cursor:pointer;text-decoration:underline;padding:0}
+.perm-link:hover{color:var(--fg)}
+.perm-skip{background:none;border:none;color:var(--fg2);font-family:inherit;font-size:13px;cursor:pointer;padding:6px 4px}
+.perm-skip:hover{color:var(--fg)}
+.perm-submit{
+  background:#0b6bcb;border:none;color:#fff;border-radius:8px;padding:6px 14px;
+  font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;
+}
+.perm-submit:hover{background:#1a7be0}
+.perm-submit span{opacity:.75;margin-left:3px}
+.perm-done{font-size:12px;color:var(--fg2)}
+.msg-author.done-name{color:var(--grn);font-family:'Consolas','JetBrains Mono',monospace}
+.msg-content code.done-chip{color:var(--fg2);font-size:11px;padding:1px 7px;border-radius:4px;background:rgba(255,255,255,.07)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{
+  display:none;width:11px;height:11px;
+  border:2px solid var(--bd2);border-top-color:var(--acc);
+  border-radius:50%;animation:spin .7s linear infinite;
+}
+.spinner.on{display:inline-block}
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div class="header">
+  <span class="chat-title" id="chatTitle">New chat</span>
+  <button class="hbtn" id="btnBookmarks" onclick="togglePanel('bookmarks')" title="Bookmarks">
+    <svg viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></svg>
+  </button>
+  <button class="hbtn" id="btnHistory" onclick="togglePanel('history')" title="Session history">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+  </button>
+  <button class="hbtn" onclick="newChat()" title="New session">
+    <svg viewBox="0 0 24 24"><path d="M20.5 12a8 8 0 0 1-8 8H4.5l2.3-2.9A8 8 0 1 1 20.5 12z"/><path d="M12 9v6M9 12h6"/></svg>
+  </button>
+  <div class="session-panel" id="sessionPanel"></div>
+</div>
+
+
+<!-- ── Planning banner ─────────────────────────────────────────── -->
+
+<!-- ── Battle mode ─────────────────────────────────────────────── -->
+<div class="battle-wrap" id="battleWrap">
+  <div class="battle-col" id="battleCol0">
+    <div class="battle-title" id="battleTitle0">Model A</div>
+    <div class="battle-body" id="battleBody0"></div>
+    <div class="battle-vote"><button onclick="voteWinner(0)">👍 Pick this</button></div>
+  </div>
+  <div class="battle-col" id="battleCol1">
+    <div class="battle-title" id="battleTitle1">Model B</div>
+    <div class="battle-body" id="battleBody1"></div>
+    <div class="battle-vote"><button onclick="voteWinner(1)">👍 Pick this</button></div>
+  </div>
+</div>
+
+<!-- ── Chat area ───────────────────────────────────────────────── -->
+<div class="chat" id="chat">
+  <div class="empty" id="empty">
+    <div class="empty-icon" id="emptyIcon"></div>
+    <h3>Autopilot</h3>
+    <p>Autopilot - an AI coding assistant made from reverse engineered Jetski RAG architecture<br><br>
+      Type <kbd>/help</kbd> for all commands<br>
+      <kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> new line
+    </p>
+  </div>
+</div>
+
+<!-- ── Pinned context panel ────────────────────────────────────── -->
+<div class="pin-panel" id="pinPanel">
+  <div class="pin-panel-title">
+    <span>📌 Pinned Context</span>
+    <button class="pin-remove" onclick="clearAllPins()" title="Clear all">✕ clear all</button>
+  </div>
+  <div id="pinList"></div>
+</div>
+
+<!-- ── File panel ──────────────────────────────────────────────── -->
+<div class="file-panel" id="filePanel">
+  <div class="file-panel-title">📁 Files detected — ready to create</div>
+  <div id="fileList"></div>
+  <div class="file-actions">
+    <button class="btn-create" onclick="postMsg('createFiles')">Create in Workspace</button>
+    <button class="btn-discard" onclick="discardFiles()">Discard</button>
+  </div>
+</div>
+
+<!-- ── Input area ─────────────────────────────────────────────── -->
+<div class="input-area">
+  <div class="img-strip" id="imgStrip"></div>
+  <div class="composer">
+    <div class="slash-menu" id="slashMenu"></div>
+    <div class="slash-menu" id="mentionMenu"></div>
+    <div class="model-menu" id="modelMenu"></div>
+    <div class="model-menu" id="modeMenu"></div>
+    <div class="model-menu plus-menu" id="plusMenu">
+      <div class="mm-item" onclick="plusAction('upload')">
+        <span class="mm-ico"><svg viewBox="0 0 24 24"><path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 14v5h14v-5"/></svg></span>
+        <div class="mm-text"><div class="mm-name">Upload from computer</div></div>
+      </div>
+      <div class="mm-item" onclick="plusAction('context')">
+        <span class="mm-ico"><svg viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 15.5h6"/></svg></span>
+        <div class="mm-text"><div class="mm-name">Add context</div></div>
+      </div>
+      <div class="mm-item" onclick="plusAction('web')">
+        <span class="mm-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.5 2.5 3.5 5.3 3.5 8.5s-1 6-3.5 8.5c-2.5-2.5-3.5-5.3-3.5-8.5s1-6 3.5-8.5z"/></svg></span>
+        <div class="mm-text"><div class="mm-name">Browse the web</div></div>
+      </div>
+    </div>
+    <div class="comp-top">
+      <div class="inp-wrap">
+        <div class="inp-mirror" id="inpMirror" aria-hidden="true"></div>
+        <textarea id="inp" rows="1"
+          placeholder="Ask anything… / for commands, @ for files"
+          oninput="onInput(this)"
+          onkeydown="onKeyDown(event)"
+          onkeyup="onKeyUp(event)"
+          onscroll="$id('inpMirror').scrollTop = this.scrollTop"
+          onclick="detectMention(this)"></textarea>
+      </div>
+      <button class="ic-btn" id="btnMic" onclick="toggleVoice(event)" title="Record a voice message (Shift+click: Windows Voice Typing)">
+        <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      </button>
+    </div>
+    <div class="comp-bar">
+      <button class="ic-btn bright" id="btnPlus" onclick="togglePlusMenu()" title="Add files, context or web content">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <input type="file" id="imgFile" multiple style="display:none" onchange="onImageFile(this)">
+      <button class="ic-btn bright" onclick="openSlash()" title="Commands">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M14 8l-4 8"/></svg>
+      </button>
+      <button class="model-pill" id="modelBtn" onclick="toggleModelMenu()" title="Select a model">
+        <span class="model-label" id="modelLabel">No model</span>
+        <span class="model-caret">▾</span>
+      </button>
+      <span class="grow"></span>
+      <span class="hint" id="statusText"></span>
+      <div class="spinner" id="spinner"></div>
+      <button class="mode-pill" id="modeBtn" onclick="toggleModeMenu()" title="Mode (Shift+Tab to switch)">
+        <span class="mode-ico" id="modeIco"></span><span id="modeLabel">Auto</span>
+      </button>
+      <button class="btn-send" id="btnSend" onclick="onSendBtn()" title="Send (Enter)">↑</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const vscode = acquireVsCodeApi();
+
+// ── State ──────────────────────────────────────────────────────
+let models = [], activeModelId = '', isStreaming = false;
+let streamEl = null, streamText = '', currentModelName = '';
+// Every running task has its own place in the chat (its turn) and its own streaming row, so tasks on different
+// models run side by side. Messages from the extension carry a runId that selects the context they belong to.
+const AUTOPILOT_ICON = "<svg viewBox=\"0 0 512 512\" xmlns=\"http://www.w3.org/2000/svg\"><g><g><path clip-rule=\"evenodd\" d=\"m119.287 387.713-2.018-54.109v-52.003c-4.422 2.046.772 3.054-8.606 3.676-9.348.623-26.056-4.862-34.217-14.498l-36.057 76.315c-6.796 14.38-1.365 33.71 13.829 38.543l38.194 12.156z\" fill=\"#9d9696\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m392.729 387.713 1.988-54.109v-52.003c4.422 2.046-.772 3.054 8.606 3.676 9.378.623 26.056-4.862 34.217-14.498l36.057 76.315c6.826 14.38 1.365 33.71-13.829 38.543l-38.194 12.156z\" fill=\"#9d9696\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m394.718 293.965-24.84-37.327 24.84-37.327c6.054-2.817 12.88-4.18 20.002-3.676 22.673 1.512 39.797 21.139 38.283 43.791-.623 9.072-4.155 17.255-9.615 23.719-8.161 9.636-20.655 15.417-34.217 14.498-5.164-.357-10.031-1.632-14.453-3.678z\" fill=\"#fdb440\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m117.269 293.965 24.84-37.327-24.84-37.327c-6.054-2.817-12.88-4.18-20.002-3.676-22.673 1.512-39.797 21.139-38.253 43.791.594 9.072 4.125 17.255 9.586 23.719 8.161 9.636 20.655 15.417 34.217 14.498 5.163-.357 10.03-1.632 14.452-3.678z\" fill=\"#fdb440\" fill-rule=\"evenodd\"/></g><g><path d=\"m256.009 84.369c-4.302 0-7.789-3.486-7.789-7.787v-33.562c0-4.301 3.487-7.787 7.789-7.787s7.789 3.486 7.789 7.787v33.562c-.001 4.301-3.488 7.787-7.789 7.787z\" fill=\"#cdbeb9\"/></g><g><path clip-rule=\"evenodd\" d=\"m374.003 199.238c0-81.771-58.997-122.656-117.995-122.656-59.027 0-118.025 40.885-118.025 122.656l120.518 26.891z\" fill=\"#eee1dc\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m394.718 340.009v-39.195-74.685-6.819c0-11.029-9.319-20.072-20.714-20.072h-236.02c-11.396 0-20.714 9.043-20.714 20.072v74.655 39.64l13.266 9.784 10.921-5.604c69.384-43.702 166.665-71.156 228.215 2.224.505 1.156 2.137.801 2.582 1.957l10.417 10.496z\" fill=\"#cdbeb9\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m374.003 199.238h-236.02c-11.396 0-20.714 9.043-20.714 20.072v32.08c0-7.234 4.006-13.579 9.971-17.137 3.146-1.838 6.826-2.935 10.743-2.935h16.025 219.994c.386 0 .742.03 1.098.03 5.164.267 9.853 2.402 13.325 5.693 3.888 3.647 6.291 8.746 6.291 14.35v-25.261-6.819c.002-11.03-9.317-20.073-20.713-20.073z\" fill=\"#9d9696\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m334.444 376.981 7.538-18.175-16.352-9.043c-44.96-8.272-91.286-8.746-139.244 0l-15.135 12.749 6.291 14.468c6.766 1.334 13.236 3.558 19.26 6.493 22.554 11.059 39.084 32.554 43.269 58.17.683 4.18 1.335 8.479 1.039 12.867l-.653 10.377c4.214 4.595 11.218 14.32 15.551 11.207l15.551-11.207c-.445-3.41-.683-6.878-.683-10.377 0-4.388.356-8.687 1.039-12.867 4.184-25.616 20.714-47.111 43.298-58.17 6.025-2.934 12.465-5.158 19.231-6.492z\" fill=\"#9d9696\" fill-rule=\"evenodd\"/></g><g><path d=\"m345.128 254.52h-25.433c-4.302 0-7.789-3.486-7.789-7.787s3.487-7.787 7.789-7.787h25.433c4.302 0 7.789 3.486 7.789 7.787s-3.488 7.787-7.789 7.787z\" fill=\"#fd4755\"/></g><g><path d=\"m192.292 254.52h-25.433c-4.302 0-7.789-3.486-7.789-7.787s3.487-7.787 7.789-7.787h25.433c4.302 0 7.789 3.486 7.789 7.787s-3.487 7.787-7.789 7.787z\" fill=\"#fd4755\"/></g><g><path clip-rule=\"evenodd\" d=\"m370.828 338.497c-19.023-44.562-63.271-75.811-114.82-75.811-51.282 0-95.352 30.894-114.552 75.1l-14.482 45.688 10.535 43.05c16.382 49.572 63.123 85.358 118.203 85.477h.297.267c52.765-.089 97.844-32.939 115.977-79.28l19.468-46.815-19.468-43.939c-.446-1.157-.921-2.314-1.425-3.47zm-114.82-30.182c30.063 0 56.238 16.751 69.622 41.449 4.481 8.272 7.538 17.463 8.814 27.217.297 2.135.475 4.299.594 6.493.059 1.305.089 2.579.089 3.884 0 21.021-8.22 40.114-21.634 54.286-11.01 11.652-25.581 19.983-41.933 23.244-5.045.978-10.238 1.512-15.551 1.512-5.342 0-10.535-.534-15.551-1.512-16.382-3.261-30.923-11.593-41.963-23.244-13.414-14.172-21.634-33.266-21.634-54.286 0-1.305.03-2.579.119-3.884.089-2.194.297-4.358.564-6.493 1.276-9.754 4.333-18.945 8.844-27.217 13.383-24.698 39.528-41.449 69.62-41.449z\" fill=\"#fdb440\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m143.385 383.474v-39.818c0-2.194-.712-4.21-1.929-5.87-1.87-2.609-4.897-4.18-8.131-4.18h-16.055-2.018c-13.651 0-24.839 11.148-24.839 24.786v39.403 4.833c0 13.638 11.188 24.816 24.839 24.816h18.073c1.484 0 2.908-.356 4.184-.919 3.443-1.601 5.876-5.1 5.876-9.132z\" fill=\"#eee1dc\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m374.003 199.238c0-81.771-58.997-122.656-117.995-122.656-5.282 0-10.535.326-15.788.978 53.329 6.641 102.266 47.2 102.266 121.677h31.517z\" fill=\"#cdbeb9\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m117.269 333.605v-39.64c-4.422 2.046-9.289 3.321-14.453 3.676-13.562.919-26.056-4.862-34.217-14.498l-13.77 29.174c7.538 5.485 16.945 8.45 26.976 7.768 2.255-.148 4.422-.474 6.559-.978 8.606-1.986 7.894.237 7.894 9.665v13.698c4.57-5.426 11.396-8.865 18.993-8.865z\" fill=\"#746e6e\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m370.828 338.497c-18.429-43.198-60.57-73.884-110.101-75.722 4.362 9.962 8.161 20.576 11.396 31.724 1.543 5.366 2.968 10.851 4.244 16.455 21.249 5.633 38.995 19.894 49.263 38.81 4.481 8.272 7.538 17.463 8.814 27.217.297 2.135.475 4.299.594 6.493.059 1.305.089 2.579.089 3.884 0 21.021-8.22 40.114-21.634 54.286-10.476 11.089-24.157 19.153-39.589 22.711-4.511 17.226-10.446 33.236-17.539 47.645 52.736-.148 97.755-32.969 115.888-79.28-2.196-1.69-3.621-4.358-3.621-7.353v-41.893-34.125c0-2.609 1.068-4.951 2.79-6.641.267-.267.534-.504.831-.741-.446-1.157-.921-2.314-1.425-3.47z\" fill=\"#fe9737\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m117.269 251.39v-32.08c-6.054-2.817-12.88-4.18-20.002-3.676-18.222 1.216-32.882 14.142-37.126 30.953 4.956-2.609 10.506-4.24 16.441-4.655 3.828-.267 7.568.03 11.129.771 12.078 2.49 8.873 9.903 8.873 21.762v19.242 13.905c2.048.148 4.125.178 6.232.03 5.164-.356 10.031-1.631 14.453-3.676v-12.363z\" fill=\"#fe9737\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m368.632 383.474v-39.818c0-2.194.712-4.21 1.899-5.87 1.899-2.609 4.897-4.18 8.161-4.18h16.025 2.018c13.651 0 24.84 11.148 24.84 24.786v39.403 4.833c0 13.638-11.188 24.816-24.84 24.816h-18.044c-1.514 0-2.908-.356-4.184-.919-3.472-1.601-5.876-5.1-5.876-9.132v-33.919z\" fill=\"#eee1dc\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m443.388 283.143c5.461-6.463 8.992-14.646 9.615-23.719 1.514-22.651-15.61-42.279-38.283-43.791-3.116-.208-6.173-.089-9.14.385 10.832 6.226 18.459 17.226 20.24 29.915.386 2.757.475 5.604.297 8.509-.623 9.072-4.155 17.285-9.615 23.719-2.196 2.579-4.689 4.892-7.419 6.878-4.273 3.054-9.14 5.337-14.364 6.582v2.342c4.422 2.046 9.289 3.321 14.453 3.676 13.561.921 26.055-4.86 34.216-14.496z\" fill=\"#fe9737\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m473.599 347.095-30.211-63.952c-8.161 9.636-20.655 15.417-34.217 14.498-5.164-.356-10.031-1.631-14.453-3.676v6.849 19.746c.772.089 1.543.148 2.315.208 9.704.652 20.329 1.393 27.718-3.736 8.636-5.989 10.268-1.957 13.058 4.536l26.561 62.025c11.633-6.909 15.312-23.66 9.229-36.498z\" fill=\"#746e6e\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m277.524 21.495c0-11.859-9.645-21.495-21.516-21.495-11.9 0-21.545 9.636-21.545 21.495 0 11.889 9.645 21.525 21.545 21.525 11.871 0 21.516-9.636 21.516-21.525z\" fill=\"#fd8087\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m277.524 21.495c0-11.859-9.645-21.495-21.516-21.495-3.175 0-6.202.682-8.903 1.897 6.113 3.795 10.179 10.585 10.179 18.293 0 8.717-5.164 16.218-12.613 19.598 3.294 2.046 7.182 3.232 11.337 3.232 11.871 0 21.516-9.636 21.516-21.525z\" fill=\"#fd4755\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m217.992 162.711c11.099 0 20.121-9.013 20.121-20.102s-9.022-20.102-20.121-20.102-20.121 9.013-20.121 20.102 9.022 20.102 20.121 20.102z\" fill=\"#60b7ff\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m238.113 142.609c0-11.089-9.022-20.102-20.121-20.102-2.879 0-5.609.623-8.102 1.69 7.093 3.113 12.019 10.199 12.019 18.412s-4.926 15.269-12.019 18.382c2.493 1.097 5.223 1.72 8.102 1.72 11.099 0 20.121-9.013 20.121-20.102z\" fill=\"#22a6fe\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m309.486 142.609c0-11.089-8.992-20.102-20.091-20.102-11.129 0-20.121 9.013-20.121 20.102s8.992 20.102 20.121 20.102c11.099 0 20.091-9.013 20.091-20.102z\" fill=\"#60b7ff\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m309.486 142.609c0-11.089-8.992-20.102-20.091-20.102-2.879 0-5.639.623-8.102 1.69 7.063 3.113 12.019 10.199 12.019 18.412s-4.956 15.269-12.019 18.382c2.463 1.097 5.223 1.72 8.102 1.72 11.099 0 20.091-9.013 20.091-20.102z\" fill=\"#22a6fe\" fill-rule=\"evenodd\"/></g><g><path clip-rule=\"evenodd\" d=\"m334.444 376.981c-1.276-9.754-4.333-18.945-8.814-27.217-14.393-2.639-28.935-4.507-43.625-5.515 1.424 12.452 2.166 25.29 2.166 38.424v.8c0 9.903-.475 19.627-1.306 29.174 7.805-12.482 19.023-22.651 32.348-29.174 6.025-2.934 12.465-5.158 19.231-6.492z\" fill=\"#746e6e\" fill-rule=\"evenodd\"/></g></g></svg>";
+$id('emptyIcon').innerHTML = AUTOPILOT_ICON;
+const EMPTY_HTML = $id('empty').innerHTML;
+const newCtx = () => ({ body: null, streamEl: null, streamText: '', lastToolRow: null, name: '', streaming: false });
+const runCtx = {};
+const defCtx = newCtx();
+let curCtx = defCtx, queuedCount = 0;
+function loadCtx(c) { curCtx = c; turnBody = c.body; streamEl = c.streamEl; streamText = c.streamText; lastToolRow = c.lastToolRow; currentModelName = c.name; }
+function saveCtx(c) { c.body = turnBody; c.streamEl = streamEl; c.streamText = streamText; c.lastToolRow = lastToolRow; c.name = currentModelName; }
+let battleTexts = ['',''];
+let slashIdx = -1;
+
+function postMsg(type, extra) { vscode.postMessage(Object.assign({ type }, extra || {})); }
+function $id(id) { return document.getElementById(id); }
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function now() {
+  const d = new Date();
+  return d.getHours().toString().padStart(2,'0') + ':' +
+         d.getMinutes().toString().padStart(2,'0');
+}
+
+// ── Markdown renderer ──────────────────────────────────────────
+function renderMd(raw) {
+  const blocks = [];
+  let s = raw.replace(/```(\w*)\r?\n([\s\S]*?)```/g, (_, lang, code) => {
+    blocks.push('<pre><code>' + escHtml(code.replace(/\n$/,'')) + '</code></pre>');
+    return '\x00B' + (blocks.length-1) + '\x00';
+  });
+  const lines = s.split('\n'), out = [];
+  let listType = null, listBuf = [];
+  function flushList() {
+    if (!listType) return;
+    out.push('<' + listType + '>' + listBuf.join('') + '</' + listType + '>');
+    listType = null; listBuf = [];
+  }
+  for (const ln of lines) {
+    if (/^\x00B\d+\x00$/.test(ln.trim())) {
+      flushList();
+      out.push(ln.trim().replace(/\x00B(\d+)\x00/, (_,n)=>blocks[+n])); continue;
+    }
+    const hm = ln.match(/^(#{1,6}) (.+)/);
+    if (hm) { flushList(); out.push('<h'+hm[1].length+'>'+inlineMd(hm[2])+'</h'+hm[1].length+'>'); continue; }
+    if (/^(-{3,}|\*{3,})$/.test(ln.trim())) { flushList(); out.push('<hr>'); continue; }
+    const ul = ln.match(/^[ \t]*[-*+] (.+)/);
+    if (ul) { if (listType!=='ul'){flushList();listType='ul';} listBuf.push('<li>'+inlineMd(ul[1])+'</li>'); continue; }
+    const ol = ln.match(/^[ \t]*\d+\. (.+)/);
+    if (ol) { if (listType!=='ol'){flushList();listType='ol';} listBuf.push('<li>'+inlineMd(ol[1])+'</li>'); continue; }
+    flushList();
+    if (!ln.trim()) { out.push('<br>'); continue; }
+    out.push('<p>'+inlineMd(ln)+'</p>');
+  }
+  flushList();
+  return out.join('');
+}
+function inlineMd(t) {
+  const codes = [];
+  t = t.replace(/`([^`]+)`/g, (_,c) => { codes.push('<code>'+escHtml(c)+'</code>'); return '\x01C'+(codes.length-1)+'\x01'; });
+  t = escHtml(t);
+  t = t.replace(/\x01C(\d+)\x01/g, (_,n)=>codes[+n]);
+  t = t.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/__(.+?)__/g,'<strong>$1</strong>');
+  t = t.replace(/\*(.+?)\*/g,'<em>$1</em>').replace(/_([^_]+)_/g,'<em>$1</em>');
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2">$1</a>');
+  return t;
+}
+
+// ── Append a message row (Claude Code-style) ──────────────────
+function hideEmpty() { const e=$id('empty'); if(e) e.style.display='none'; }
+
+// Replies are appended to the body of the current turn (the one started by the last user message)
+let turnBody = null;
+// Chips for the images of the message just sent: thumbnail, file name, width x height
+function imageChips() {
+  const imgs = lastSentImages; lastSentImages = [];
+  if (!imgs.length) return '<span class="user-chip">image attached</span>';
+  return imgs.map(m =>
+    '<span class="user-chip"><img class="chip-thumb" src="' + m.url + '" alt=""><b>' + escHtml(m.name) + '</b>' +
+    (m.w ? '<span class="chip-dim">' + m.w + '×' + m.h + '</span>' : '') + '</span>').join('');
+}
+function audioChips() {
+  const a = lastSentAudio; lastSentAudio = [];
+  return a.map(m => '<span class="user-chip">🎤 <b>' + escHtml(m.name) + '</b>' + (m.seconds ? '<span class="chip-dim">' + fmtDur(m.seconds) + '</span>' : '') + '</span>').join('');
+}
+function startTurn(text, hasImages, id) {
+  const aud = audioChips();
+  rememberInput(text);                 // also fills ArrowUp history when an old session is reloaded
+  hideEmpty();
+  const chat = $id('chat');
+  const turn = document.createElement('div');
+  turn.className = 'turn';
+  turn.innerHTML =
+    '<div class="user-row"><div class="user-time">' + now() + '</div><div class="user-card">' +
+      (hasImages || aud ? '<div class="user-chips">' + (hasImages ? imageChips() : '') + aud + '</div>' : '') +
+      '<div class="user-text clamped">' + tagHtml(text) + '</div>' +
+      '<button class="user-more" type="button">Show more</button>' +
+      (id ? '<button class="user-restore" data-id="' + escHtml(id) + '" title="Restore to before this message">' + CARD_ICONS.restore + '</button>' : '') +
+    '</div></div><div class="turn-body"></div>';
+  chat.appendChild(turn);
+  turnBody = turn.querySelector('.turn-body');
+  // Long messages stay folded to a few lines; the toggle only appears when the text really overflows
+  const txt = turn.querySelector('.user-text');
+  if (txt.scrollHeight > txt.clientHeight + 4) turn.querySelector('.user-more').style.display = 'inline-block';
+  else txt.classList.remove('clamped');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function addRow(dotClass, authorHtml, contentHtml, opts) {
+  hideEmpty();
+  const chat = $id('chat');
+  const row  = document.createElement('div');
+  row.className = 'msg-row';
+  row.innerHTML =
+    '<div class="msg-gutter"><div class="msg-dot ' + (dotClass||'') + '"></div></div>' +
+    '<div class="msg-body">' +
+      '<div class="msg-head">' +
+        '<span class="msg-author ' + (opts&&opts.authorClass||'') + '">' + authorHtml + '</span>' +
+        (opts&&opts.tag ? '<span class="msg-model-tag">' + escHtml(opts.tag) + '</span>' : '') +
+        '<span class="msg-ts">' + now() + '</span>' +
+      '</div>' +
+      '<div class="msg-content ' + (opts&&opts.contentClass||'') + '">' + contentHtml + '</div>' +
+    '</div>';
+  (turnBody || chat).appendChild(row);
+  chat.scrollTop = chat.scrollHeight;
+  return row.querySelector('.msg-content');
+}
+
+// ── Extension → Webview messages ──────────────────────────────
+window.addEventListener('message', ({data}) => {
+  if (data.type === 'userMessage' && data.runId && !runCtx[data.runId]) runCtx[data.runId] = newCtx();
+  const ctx = (data.runId && runCtx[data.runId]) || defCtx;
+  loadCtx(ctx);
+  try { handleMessage(data); } finally { saveCtx(ctx); }
+});
+function handleMessage(data) {
+  switch (data.type) {
+    case 'models':       onModels(data.models, data.activeId); break;
+    case 'userMessage':  onUserMsg(data.text, data.hasImages, data.id); break;
+    case 'setInput': {
+      const el = $id('inp');
+      el.value = data.text || ''; histIdx = -1; autoResize(el);
+      el.focus(); el.setSelectionRange(el.value.length, el.value.length);
+      break;
+    }
+    case 'streamStart':  onStreamStart(data.model, data.iteration); break;
+    case 'streamDelta':  onStreamDelta(data.content); break;
+    case 'streamEnd':    onStreamEnd(data.text); break;
+    case 'runState':     onRunState(!!data.running, data.active, data.queued); break;
+    case 'queued':       onQueued(data.runId, data.text); break;
+    case 'fileChanged':  onFileChanged(data); break;
+    case 'runStarted':   onRunStarted(data.runId); break;
+    case 'queueCancelled': onQueueCancelled(data.runId); break;
+    case 'runDone':      onRunDone(data.status, data.ms, data.tools); break;
+    case 'fileResults':     onFileResults(data.query, data.files); break;
+    case 'choiceCard':      onChoiceCard(data); break;
+    case 'cardResolved':    onCardResolved(data.id, data.label); break;
+    case 'mode':         onMode(data.mode); break;
+    case 'addPin':       pinItem(data.label, data.content); break;
+    case 'sessionInfo':  onSessionInfo(data.title, data.bookmarked); break;
+    case 'sessionList':  onSessionList(data.sessions, data.currentId); break;
+    case 'error':        onError(data.text); break;
+    case 'clearChat':    onClear(); break;
+    case 'history':      onHistory(data.messages); break;
+    case 'filesDetected': onFilesDetected(data.files); break;
+    case 'filesCreated':  onFilesCreated(data.files); break;
+    case 'toolCall':     onToolCall(data.name, data.args); break;
+    case 'toolResult':   onToolResult(data.name, data.ok, data.output); break;
+    case 'systemMessage': onSystemMsg(data.text); break;
+    case 'status':       onStatus(data); break;
+    case 'tokenUsage':   onTokenUsage(data.tokens, data.max); break;
+    case 'imageAdded':   /* handled locally */ break;
+    case 'audioAdded':   /* handled locally */ break;
+    case 'planningStart': onPlanningStart(data.task); break;
+    case 'planningEnd':   onPlanningEnd(); break;
+    case 'battleStart':   onBattleStart(data.models); break;
+    case 'battleDelta':   onBattleDelta(data.idx, data.content); break;
+    case 'battleEnd':     onBattleEnd(data.idx, data.error); break;
+    case 'battleComplete': break;
+  }
+}
+
+// busy = a whole agent run is in progress (spans model turns and tool calls); isStreaming = one model turn
+let busy = false, micOn = false;
+const DEFAULT_PLACEHOLDER = $id('inp').placeholder;
+function hasDraft() { return !!($id('inp').value.trim() || attachedMeta.length || audioMeta.length); }
+// While tasks run the box stays editable: Enter queues the message when it uses a model that is busy, otherwise it runs in parallel.
+// The button is Stop only when there is nothing to send.
+function refreshComposer() {
+  const btn = $id('btnSend'), inp = $id('inp');
+  inp.disabled = false;
+  const stopMode = busy && !hasDraft();
+  btn.classList.toggle('stop', stopMode);
+  btn.textContent = stopMode ? '■' : '↑';
+  btn.title = stopMode ? 'Stop all tasks' : (busy ? 'Send: queued if this model is busy, otherwise runs in parallel' : 'Send (Enter)');
+  btn.disabled = false;
+  inp.placeholder = busy ? 'Enter queues on a busy model, runs in parallel on another one…' : DEFAULT_PLACEHOLDER;
+}
+function refreshActivity() {
+  const names = [defCtx, ...Object.values(runCtx)].filter(c => c.streaming).map(c => c.name).filter(Boolean);
+  isStreaming = names.length > 0;
+  $id('spinner').classList.toggle('on', isStreaming || busy);
+  const parts = [];
+  if (names.length) parts.push('▶ ' + names.join(' · '));
+  if (queuedCount) parts.push(queuedCount + ' queued');
+  $id('statusText').textContent = parts.join('  ');
+}
+function setStreaming(on, name) {
+  curCtx.streaming = on;
+  if (on && name) curCtx.name = name;
+  refreshActivity();
+  refreshComposer();
+}
+function onRunState(running, active, queued) {
+  busy = running;
+  queuedCount = queued || 0;
+  refreshActivity();
+  refreshComposer();
+  if (!running) $id('inp').focus();
+}
+// A file the agent changed: name, +/- counts and Accept / Revert. One card per file in a turn, kept up to date.
+function onFileChanged(d) {
+  // compare paths directly: Windows paths hold backslashes, which break attribute selectors
+  const same = root => Array.from(root.querySelectorAll('.fc-card')).filter(c => c.dataset.path === d.path);
+  let cards = same(turnBody || $id('chat'));
+  if (!cards.length && d.create && turnBody) {
+    const c = document.createElement('div');
+    c.className = 'fc-card'; c.dataset.path = d.path;
+    turnBody.appendChild(c);
+    cards = [c];
+  }
+  if (!d.create) cards = same(document);   // a later decision updates every card of that file
+  cards.forEach(c => renderFileCard(c, d));
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+function renderFileCard(c, d) {
+  const name = d.rel || d.path;
+  const stat = '<span class="fc-stat"><b class="fc-add">+' + d.added + '</b><b class="fc-del">−' + d.removed + '</b></span>';
+  const tail = d.state === 'accepted' ? '<span class="fc-done">✓ Accepted</span>'
+             : d.state === 'reverted' ? '<span class="fc-done">↩ ' + (d.created ? 'Deleted' : 'Reverted') + '</span>'
+             : '<span class="fc-actions"><button type="button" data-a="accept">✓ Accept</button><button type="button" data-a="revert">✕ ' + (d.created ? 'Delete' : 'Revert') + '</button></span>';
+  c.className = 'fc-card' + (d.state === 'pending' ? '' : ' resolved');
+  c.innerHTML = '<span class="fc-ico">' + (d.created ? '＋' : '✎') + '</span><a class="fc-name" title="Open ' + escHtml(name) + '">' + escHtml(name) + '</a>' + stat + tail;
+}
+$id('chat').addEventListener('click', e => {
+  const card = e.target.closest && e.target.closest('.fc-card');
+  if (!card) return;
+  const btn = e.target.closest('button[data-a]');
+  if (btn) { postMsg('reviewAction', { path: card.dataset.path, action: btn.dataset.a }); return; }
+  if (e.target.closest('.fc-name')) postMsg('reviewAction', { path: card.dataset.path, action: 'open' });
+});
+
+// A message that has to wait shows a note under its user card, with a way to cancel it
+function onQueued(runId, text) {
+  if (!turnBody) return;
+  const n = document.createElement('div');
+  n.className = 'queue-note'; n.dataset.run = runId;
+  n.innerHTML = '<span>⏳ ' + escHtml(text || 'Queued') + '</span><button type="button">Cancel</button>';
+  n.querySelector('button').onclick = () => postMsg('cancelQueued', { runId });
+  turnBody.appendChild(n);
+}
+function onRunStarted(runId) { document.querySelectorAll('.queue-note[data-run="' + runId + '"]').forEach(n => n.remove()); }
+function onQueueCancelled(runId) {
+  document.querySelectorAll('.queue-note[data-run="' + runId + '"]').forEach(n => { n.classList.add('cancelled'); n.innerHTML = '<span>✕ Cancelled</span>'; });
+}
+// ── Chat title, session history, bookmarks ─────────────────────
+let sessionList = [], currentSessionId = '', currentBookmarked = false, panelMode = '', pendingDelete = '';
+const ICON_BM = '<svg viewBox="0 0 24 24"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"/></svg>';
+
+function onSessionInfo(title, bookmarked) {
+  const el = $id('chatTitle');
+  el.textContent = title || 'New chat';
+  el.title = title || '';
+  currentBookmarked = !!bookmarked;
+  $id('btnBookmarks').classList.toggle('on', currentBookmarked);
+  if (panelMode === 'bookmarks') renderPanel();
+}
+function onSessionList(list, curId) {
+  sessionList = list || []; currentSessionId = curId || '';
+  if (panelMode) renderPanel();
+}
+function togglePanel(mode) {
+  if (panelMode === mode) { closePanel(); return; }
+  panelMode = mode; pendingDelete = '';
+  $id('sessionPanel').classList.add('show');
+  renderPanel();
+  postMsg('sessions');
+}
+function closePanel() {
+  panelMode = ''; pendingDelete = '';
+  $id('sessionPanel').classList.remove('show');
+}
+function relTime(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+function renderPanel() {
+  const panel = $id('sessionPanel');
+  panel.innerHTML = '';
+  const add = (el) => panel.appendChild(el);
+  const mk = (cls, html, tag) => { const e = document.createElement(tag || 'div'); e.className = cls; if (html != null) e.innerHTML = html; return e; };
+
+  let items = sessionList;
+  if (panelMode === 'bookmarks') {
+    const act = mk('sp-action' + (currentBookmarked ? ' on' : ''), ICON_BM + '<span>' + (currentBookmarked ? 'Remove bookmark from this chat' : 'Bookmark this chat') + '</span>', 'button');
+    act.onclick = () => postMsg('bookmarkSession');
+    add(act);
+    items = sessionList.filter(s => s.bookmarked);
+    add(mk('sp-head', 'Bookmarked chats'));
+  } else {
+    add(mk('sp-head', 'Session history'));
+  }
+  if (!items.length) {
+    add(mk('sp-empty', panelMode === 'bookmarks' ? 'No bookmarked chats yet' : 'No previous sessions'));
+    return;
+  }
+  items.forEach(s => {
+    const row = mk('sp-item' + (s.id === currentSessionId ? ' cur' : ''));
+    const main = mk('sp-main', '<div class="sp-title">' + escHtml(s.title) + '</div><div class="sp-meta">' +
+      relTime(s.updated) + ' · ' + s.count + ' msg</div>');
+    const bm = mk('sp-btn' + (s.bookmarked ? ' on' : ''), ICON_BM, 'button');
+    bm.title = s.bookmarked ? 'Remove bookmark' : 'Bookmark';
+    bm.onclick = (e) => { e.stopPropagation(); postMsg('bookmarkSession', { id: s.id }); };
+    row.appendChild(main); row.appendChild(bm);
+    if (s.id !== currentSessionId) {
+      const del = mk('sp-btn' + (pendingDelete === s.id ? ' danger' : ''), pendingDelete === s.id ? '✓' : '✕', 'button');
+      del.title = pendingDelete === s.id ? 'Click again to delete' : 'Delete';
+      del.onclick = (e) => {
+        e.stopPropagation();
+        if (pendingDelete === s.id) { pendingDelete = ''; postMsg('deleteSession', { id: s.id }); }
+        else { pendingDelete = s.id; renderPanel(); }
+      };
+      row.appendChild(del);
+    }
+    row.onclick = () => { if (s.id !== currentSessionId) postMsg('openSession', { id: s.id }); closePanel(); };
+    add(row);
+  });
+}
+document.addEventListener('mousedown', e => {
+  if (panelMode && !e.target.closest('.header')) closePanel();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && panelMode) closePanel(); });
+
+// ── Choice card: tool permissions and plan approval, shown inside the task's reply ──
+const CARD_ICONS = {
+  terminal: '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="M7 9.5l3 2.5-3 2.5M13 15h4"/></svg>',
+  file:     '<svg viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 13h6M9 16.5h4"/></svg>',
+  plan:     '<svg viewBox="0 0 24 24"><path d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2z"/><path d="M9.5 9h5M9.5 13h3"/></svg>',
+  restore:  '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4.5v4.6h4.6"/></svg>'
+};
+const cards = {};
+let activeCard = null;
+
+function onChoiceCard(d) {
+  const isPlan = String(d.id).startsWith('plan:');
+  const label = isPlan ? 'Plan' : String(d.id).startsWith('restore:') ? 'Restore' : 'Permission';
+  const content = addRow('tool', label, '<div class="perm"></div>', { authorClass: 'tool-name' });
+  const card = { id: d.id, d, sel: 0, text: '', sent: false, el: content.querySelector('.perm'), focusFb: false };
+  cards[d.id] = card;
+  activeCard = card;
+  renderCard(card);
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+
+function renderCard(c) {
+  const d = c.d;
+  const opts = d.options.map((o, i) => {
+    const sel = i === c.sel;
+    return '<div class="perm-opt' + (sel ? ' sel' : '') + '" data-i="' + i + '">' +
+        '<span class="perm-num">' + (i + 1) + '</span>' +
+        '<span class="perm-lab">' + escHtml(o.label) + (o.hint ? ' <span class="perm-hint">' + escHtml(o.hint) + '</span>' : '') + '</span>' +
+      '</div>' +
+      (sel && o.input ? '<div class="perm-fbrow"><input class="perm-fb" placeholder="' + escHtml(o.input) + '" value="' + escHtml(c.text) + '"></div>' : '');
+  }).join('');
+  c.el.innerHTML =
+    '<div class="perm-title"><span class="perm-ico">' + (CARD_ICONS[d.icon] || CARD_ICONS.file) + '</span>' + escHtml(d.title) + '</div>' +
+    (d.detail ? '<div class="perm-detail">' + escHtml(d.detail) + '</div>' : '') +
+    '<div class="perm-opts">' + opts + '</div>' +
+    '<div class="perm-foot">' +
+      (d.link ? '<button class="perm-link" data-act="link">' + escHtml(d.link.label) + '</button>' : '') +
+      '<span class="grow"></span>' +
+      '<button class="perm-skip" data-act="skip">Skip</button>' +
+      '<button class="perm-submit" data-act="submit">Submit <span>↵</span></button>' +
+    '</div>';
+  c.el.onclick = e => {
+    if (c.sent) return;
+    const opt = e.target.closest('.perm-opt');
+    if (opt) { c.sel = +opt.dataset.i; c.focusFb = true; renderCard(c); return; }
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'submit') submitCard(c);
+    else if (act === 'skip') answerCard(c, 'skip');
+    else if (act === 'link') postMsg(d.link.action);
+  };
+  const fb = c.el.querySelector('.perm-fb');
+  if (fb) {
+    fb.oninput = () => { c.text = fb.value; };
+    fb.onkeydown = e => {
+      if (e.key === 'Enter') { e.preventDefault(); submitCard(c); }
+      else if (e.key === 'Escape') { e.preventDefault(); answerCard(c, 'skip'); }
+    };
+    if (c.focusFb) { fb.focus(); fb.setSelectionRange(fb.value.length, fb.value.length); }
+  }
+  c.focusFb = false;
+}
+function submitCard(c) { answerCard(c, c.d.options[c.sel].value); }
+function answerCard(c, value) {
+  if (c.sent) return;
+  c.sent = true;
+  c.el.classList.add('sent');
+  postMsg('cardResponse', { id: c.id, value, text: c.text });
+}
+function onCardResolved(id, label) {
+  const c = cards[id];
+  if (!c) return;
+  c.sent = true;
+  c.el.classList.add('resolved');
+  c.el.innerHTML = '<div class="perm-done">' + escHtml(label) + '</div>';
+  if (activeCard === c) activeCard = null;
+}
+// Keyboard: 1-9 pick an option, arrows move, Enter submits, Esc skips (not while typing in a box)
+document.addEventListener('keydown', e => {
+  const c = activeCard;
+  if (!c || c.sent || (e.target.closest && e.target.closest('textarea, input'))) return;
+  const n = c.d.options.length;
+  if (/^[1-9]$/.test(e.key) && +e.key <= n) { c.sel = +e.key - 1; c.focusFb = true; renderCard(c); e.preventDefault(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { c.sel = (c.sel + (e.key === 'ArrowDown' ? 1 : -1) + n) % n; c.focusFb = true; renderCard(c); e.preventDefault(); }
+  else if (e.key === 'Enter') { e.preventDefault(); submitCard(c); }
+  else if (e.key === 'Escape') { e.preventDefault(); answerCard(c, 'skip'); }
+}, true);
+
+// "Done" bubble shown when an agent run finishes successfully (errors and Stop already have their own rows)
+function onRunDone(status, ms, tools) {
+  if (status !== 'done') return;
+  const secs = ms < 1000 ? '<1s' : ms < 60000 ? Math.round(ms / 1000) + 's' : Math.floor(ms / 60000) + 'm ' + Math.round((ms % 60000) / 1000) + 's';
+  const chips = ['✓ ' + secs, tools ? tools + ' tool call' + (tools > 1 ? 's' : '') : '']
+    .filter(Boolean).map(t => '<code class="done-chip">' + escHtml(t) + '</code>').join(' ');
+  // Same row structure as assistant / tool rows: gutter dot, header, content
+  addRow('done', 'Done', chips, { authorClass: 'done-name' });
+}
+
+function onSendBtn() { if (busy && !hasDraft()) postMsg('stop'); else send(); }
+function setMic(on) { micOn = on; $id('btnMic').classList.toggle('rec', on); }
+// Dictation through Windows Voice Typing (Win+H): text appears in the input box
+function toggleDictation() {
+  const inp = $id('inp');
+  if (inp.disabled) return;
+  inp.focus();
+  setMic(!micOn);
+  postMsg('voice');
+}
+
+// ── Voice messages: record -> 16 kHz mono WAV -> chip; sent to an audio model with the next message ──
+let recorder = null, recTimer = null;
+let audioMeta = [], lastSentAudio = [];
+const MAX_REC_MS = 120000;
+const fmtDur = sec => Math.floor(sec / 60) + ':' + String(Math.round(sec % 60)).padStart(2, '0');
+
+async function toggleVoice(ev) {
+  if (ev && ev.shiftKey) { toggleDictation(); return; }
+  if (recorder) { stopRecording(); return; }
+  if ($id('inp').disabled) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { micFallback('no microphone API in this panel'); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { micFallback(e && e.name === 'NotAllowedError' ? 'microphone access was denied' : 'no microphone available'); return; }
+  const chunks = [];
+  const mr = new MediaRecorder(stream);
+  recorder = { mr, stream, chunks, t0: Date.now() };
+  mr.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  mr.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    const rec = recorder; recorder = null;
+    clearTimeout(recTimer);
+    $id('btnMic').classList.remove('rec');
+    $id('btnMic').title = 'Record a voice message (Shift+click: Windows Voice Typing)';
+    if (!rec || !chunks.length) return;
+    try {
+      const wav = await blobToWav(new Blob(chunks, { type: mr.mimeType || 'audio/webm' }));
+      attachAudio(wav.b64, 'wav', 'Voice message', wav.seconds);
+    } catch (e) { onSystemMsg('Could not process the recording: ' + (e && e.message ? e.message : e)); }
+  };
+  mr.start();
+  $id('btnMic').classList.add('rec');
+  $id('btnMic').title = 'Recording… click to stop';
+  recTimer = setTimeout(stopRecording, MAX_REC_MS);
+}
+function stopRecording() { if (recorder && recorder.mr.state !== 'inactive') recorder.mr.stop(); }
+function micFallback(why) {
+  onSystemMsg('🎤 Cannot record here (' + why + '). Using Windows Voice Typing instead.');
+  toggleDictation();
+}
+
+async function blobToWav(blob) {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  ctx.close();
+  const RATE = 16000;
+  const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * RATE)), RATE);
+  const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+  const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, RATE, true); v.setUint32(28, RATE * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  const bytes = new Uint8Array(buf); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return { b64: btoa(bin), seconds: decoded.duration };
+}
+
+function attachAudio(b64, format, name, seconds) {
+  vscode.postMessage({ type: 'audioAttach', data: b64, format });
+  const meta = { name, seconds };
+  audioMeta.push(meta);
+  addAudioChip(meta);
+  refreshComposer();
+}
+function addAudioChip(meta) {
+  const strip = $id('imgStrip');
+  strip.classList.add('show');
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;height:44px;padding:0 22px 0 10px;border-radius:4px;border:1px solid var(--bd);display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg2)';
+  wrap.textContent = '🎤 ' + meta.name + (meta.seconds ? ' ' + fmtDur(meta.seconds) : '');
+  const rm = document.createElement('button');
+  rm.textContent = '×';
+  rm.style.cssText = 'position:absolute;top:0;right:0;background:rgba(0,0,0,.65);color:#fff;border:none;cursor:pointer;padding:0 3px;font-size:10px;line-height:1.4';
+  rm.onclick = () => {
+    const idx = audioMeta.indexOf(meta);
+    if (idx >= 0) { audioMeta.splice(idx, 1); vscode.postMessage({ type: 'removeAudio', index: idx }); }
+    wrap.remove();
+    if (!strip.children.length) strip.classList.remove('show');
+  };
+  wrap.appendChild(rm);
+  strip.appendChild(wrap);
+}
+function attachAudioFile(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const fmt = ({ wav: 'wav', mp3: 'mp3', ogg: 'ogg', oga: 'ogg', flac: 'flac', m4a: 'm4a', aac: 'aac', aiff: 'aiff', aif: 'aiff' })[ext];
+  if (!fmt) { onSystemMsg('Skipped **' + file.name + '**: unsupported audio format (use wav, mp3, ogg, flac, m4a, aac or aiff)'); return; }
+  if (file.size > 12 * 1024 * 1024) { onSystemMsg('Skipped **' + file.name + '**: larger than 12 MB'); return; }
+  const r = new FileReader();
+  r.onload = e => attachAudio(String(e.target.result).replace(/^data:[^;]*;base64,/, ''), fmt, file.name, 0);
+  r.readAsDataURL(file);
+}
+function openSlash() {
+  const inp = $id('inp');
+  if (inp.disabled) return;
+  inp.value = '/'; inp.focus(); onInput(inp);
+}
+
+let menuOpen = false, menuIdx = -1;
+function onModels(list, activeId) {
+  models = list||[]; activeModelId = activeId||(models[0]?.id||'');
+  const active = models.find(m => m.id === activeModelId);
+  $id('modelLabel').textContent = active ? active.name : 'No model';
+  if (menuOpen) renderModelMenu();
+}
+function toggleModelMenu() { menuOpen ? closeModelMenu() : openModelMenu(); }
+function openModelMenu() {
+  closeModeMenu(); closePlusMenu(); hideSlashMenu();
+  menuOpen = true;
+  menuIdx = Math.max(0, modelGroups().findIndex(g => g.items.some(m => m.id === activeModelId)));
+  $id('modelMenu').classList.add('show');
+  $id('modelBtn').classList.add('open');
+  renderModelMenu();
+}
+function closeModelMenu() {
+  menuOpen = false;
+  $id('modelMenu').classList.remove('show');
+  $id('modelBtn').classList.remove('open');
+}
+// Models of one family (same provider) share a row; a slider picks the variant (size)
+const PROVIDER_LABEL = { ollama: 'Ollama', openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter', custom: 'Custom' };
+const paramsOf = m => { const x = /(\d+(?:\.\d+)?)\s*B\b/i.exec((m.variant || '') + ' ' + m.name); return x ? parseFloat(x[1]) : 1e9; };
+let groupSel = {};     // group key -> id of the variant last chosen on its slider
+function modelGroups() {
+  const groups = [], byKey = new Map();
+  models.forEach(m => {
+    const prov = PROVIDER_LABEL[m.provider] || m.provider;
+    if (m.family) {
+      const key = m.family + '|' + m.provider;
+      let g = byKey.get(key);
+      if (!g) { g = { key, title: m.family + ' (' + prov + ')', items: [] }; byKey.set(key, g); groups.push(g); }
+      g.items.push(m);
+    } else {
+      groups.push({ key: m.id, title: /\(/.test(m.name) ? m.name : m.name + ' (' + prov + ')', items: [m] });
+    }
+  });
+  groups.forEach(g => g.items.sort((a, b) => paramsOf(a) - paramsOf(b)));
+  return groups;
+}
+// The variant a row currently stands for: the active model, else the one last chosen, else the middle one
+function groupCurrent(g) {
+  return g.items.find(m => m.id === activeModelId) || g.items.find(m => m.id === groupSel[g.key]) || g.items[Math.floor(g.items.length / 2)];
+}
+function setVariant(g, m) {                       // slider moved: switch model, keep the menu open
+  groupSel[g.key] = m.id;
+  if (m.id !== activeModelId) {
+    activeModelId = m.id;
+    $id('modelLabel').textContent = m.name;
+    vscode.postMessage({ type: 'setModel', modelId: m.id });
+  }
+  renderModelMenu();
+}
+function bindSlider(el, g, label, desc) {
+  const at = ev => {
+    const r = el.getBoundingClientRect();
+    return g.items[Math.round(Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (g.items.length - 1))];
+  };
+  const preview = m => {
+    el.style.setProperty('--f', g.items.indexOf(m) / (g.items.length - 1));
+    label.textContent = m.variant || m.name;
+    desc.textContent = m.description || (m.provider + ' · ' + m.modelId);
+  };
+  let down = false;
+  el.onpointerdown = ev => { ev.preventDefault(); ev.stopPropagation(); down = true; el.setPointerCapture(ev.pointerId); preview(at(ev)); };
+  el.onpointermove = ev => { if (down) preview(at(ev)); };
+  el.onpointerup   = ev => { if (down) { down = false; setVariant(g, at(ev)); } };
+  el.onclick = ev => ev.stopPropagation();
+}
+function renderModelMenu() {
+  const menu = $id('modelMenu');
+  menu.innerHTML = '<div class="mm-title">Select a model</div>';
+  const groups = modelGroups();
+  groups.forEach((g, i) => {
+    const cur = groupCurrent(g), multi = g.items.length > 1;
+    const el = document.createElement('div');
+    el.className = 'mm-item' + (i === menuIdx ? ' focus' : '');
+    el.innerHTML = '<span class="mm-check">' + (g.items.some(m => m.id === activeModelId) ? '✓' : '') + '</span>' +
+      '<div class="mm-text"><div class="mm-name">' + escHtml(g.title) + '</div>' +
+      '<div class="mm-desc">' + escHtml(cur.description || (cur.provider + ' · ' + cur.modelId)) + '</div></div>' +
+      (multi ? '<span class="mm-var">' + escHtml(cur.variant || cur.name) + '</span>' +
+               '<span class="vslider" style="--f:' + (g.items.indexOf(cur) / (g.items.length - 1)) + '" title="Variant"><span class="vs-fill"></span><span class="vs-thumb"></span></span>' : '');
+    el.onclick = () => pickModel(cur.id);
+    el.onmouseenter = () => { menuIdx = i; menu.querySelectorAll('.mm-item').forEach((n, k) => n.classList.toggle('focus', k === i)); };
+    if (multi) bindSlider(el.querySelector('.vslider'), g, el.querySelector('.mm-var'), el.querySelector('.mm-desc'));
+    menu.appendChild(el);
+  });
+  const act = (label, onclick, idx) => {
+    const el = document.createElement('div');
+    el.className = 'mm-item' + (idx === menuIdx ? ' focus' : '');
+    el.innerHTML = '<span class="mm-check"></span><div class="mm-text"><div class="mm-name mm-act">' + escHtml(label) + '</div></div>';
+    el.onclick = onclick;
+    el.onmouseenter = () => { menuIdx = idx; menu.querySelectorAll('.mm-item').forEach((n, k) => n.classList.toggle('focus', k === idx)); };
+    menu.appendChild(el);
+  };
+  const sep = document.createElement('div'); sep.className = 'mm-sep'; menu.appendChild(sep);
+  act('＋ Add model…', () => { closeModelMenu(); addModel(); }, groups.length);
+  if (models.length) act('✕ Remove current model…', () => { closeModelMenu(); removeModel(); }, groups.length + 1);
+}
+function pickModel(id) {
+  closeModelMenu();
+  if (id === activeModelId) return;
+  activeModelId = id;
+  const m = models.find(x => x.id === id);
+  $id('modelLabel').textContent = m ? m.name : 'No model';
+  vscode.postMessage({ type: 'setModel', modelId: id });
+}
+function modelMenuKey(e) {
+  const groups = modelGroups();
+  const total = groups.length + 1 + (models.length ? 1 : 0);
+  if (e.key === 'Escape') { closeModelMenu(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    menuIdx = (menuIdx + (e.key === 'ArrowDown' ? 1 : -1) + total) % total;
+    renderModelMenu();
+    $id('modelMenu').querySelectorAll('.mm-item')[menuIdx]?.scrollIntoView({ block: 'nearest' });
+  } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && menuIdx < groups.length && groups[menuIdx].items.length > 1) {
+    e.preventDefault();                          // move the variant slider of the focused row
+    const g = groups[menuIdx], i = g.items.indexOf(groupCurrent(g));
+    setVariant(g, g.items[Math.min(g.items.length - 1, Math.max(0, i + (e.key === 'ArrowRight' ? 1 : -1)))]);
+  } else if (e.key === 'Enter') {
+    e.preventDefault(); e.stopPropagation();   // don't let the textarea also treat this Enter as "send"
+    $id('modelMenu').querySelectorAll('.mm-item')[menuIdx]?.click();
+  }
+}
+document.addEventListener('mousedown', e => {
+  if (menuOpen && !e.target.closest('#modelMenu') && !e.target.closest('#modelBtn')) closeModelMenu();
+});
+document.addEventListener('keydown', e => { if (menuOpen) modelMenuKey(e); }, true);
+
+// ── Modes (permission level for the agent's actions) ───────────
+const MODE_ICONS = {
+  manual: '<svg viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4.5a1.5 1.5 0 0 1 3 0V11M14 10V6a1.5 1.5 0 0 1 3 0v6.5c0 4-2.5 7-6 7-2.5 0-4-1.2-5.2-3.2L4 13.5a1.5 1.5 0 0 1 2.6-1.4L8 14"/></svg>',
+  edit:   '<svg viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13.5 5.5l-3 13"/></svg>',
+  plan:   '<svg viewBox="0 0 24 24"><path d="M7 4h10a2 2 0 0 1 2 2v14l-3-2-3 2-3-2-3 2V6a2 2 0 0 1 2-2z"/><path d="M9.5 9h5M9.5 13h3"/></svg>',
+  research: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5"/><path d="M15 15l5 5"/></svg>',
+  auto:'<svg viewBox="0 0 24 24"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg>'
+};
+const MODES = [
+  { id: 'manual', name: 'Manual',             desc: 'Ask for approval before every edit or command' },
+  { id: 'edit',   name: 'Edit automatically', desc: 'Apply file edits directly; ask before running commands' },
+  { id: 'plan',   name: 'Plan',               desc: 'Explore the code and present a plan before editing' },
+  { id: 'research', name: 'Research',         desc: 'Explore reference code on GitHub and search the docs of your dependencies, then write Research.md' },
+  { id: 'auto',   name: 'Auto',               desc: 'Run actions that pass the safety check; ask for anything risky' }
+];
+let currentMode = 'auto', modeMenuOpen = false, modeIdx = 0;
+
+function onMode(mode) {
+  const m = MODES.find(x => x.id === mode) || MODES.find(x => x.id === 'auto');
+  currentMode = m.id;
+  $id('modeLabel').textContent = m.name === 'Edit automatically' ? 'Edit' : m.name;
+  $id('modeIco').innerHTML = MODE_ICONS[m.id];
+  if (modeMenuOpen) renderModeMenu();
+}
+function chooseMode(id) {
+  closeModeMenu();
+  if (id === currentMode) return;
+  onMode(id);
+  postMsg('setMode', { mode: id });
+}
+function toggleModeMenu() { modeMenuOpen ? closeModeMenu() : openModeMenu(); }
+function openModeMenu() {
+  if (busy) return;
+  closeModelMenu(); closePlusMenu(); hideSlashMenu();
+  modeMenuOpen = true;
+  modeIdx = Math.max(0, MODES.findIndex(m => m.id === currentMode));
+  $id('modeMenu').classList.add('show');
+  $id('modeBtn').classList.add('open');
+  renderModeMenu();
+}
+function closeModeMenu() {
+  modeMenuOpen = false;
+  $id('modeMenu').classList.remove('show');
+  $id('modeBtn').classList.remove('open');
+}
+function renderModeMenu() {
+  const menu = $id('modeMenu');
+  menu.innerHTML = '<div class="mm-title"><span>Modes</span><span><kbd>⇧</kbd> + <kbd>tab</kbd> to switch</span></div>';
+  MODES.forEach((m, i) => {
+    const el = document.createElement('div');
+    el.className = 'mm-item' + (i === modeIdx ? ' focus' : '');
+    el.innerHTML = '<span class="mm-ico">' + MODE_ICONS[m.id] + '</span>' +
+      '<div class="mm-text"><div class="mm-name">' + escHtml(m.name) + '</div><div class="mm-desc" style="white-space:normal">' + escHtml(m.desc) + '</div></div>' +
+      '<span class="mm-check">' + (m.id === currentMode ? '✓' : '') + '</span>';
+    el.onclick = () => chooseMode(m.id);
+    el.onmouseenter = () => { modeIdx = i; menu.querySelectorAll('.mm-item').forEach((n, j) => n.classList.toggle('focus', j === i)); };
+    menu.appendChild(el);
+  });
+}
+document.addEventListener('mousedown', e => {
+  if (modeMenuOpen && !e.target.closest('#modeMenu') && !e.target.closest('#modeBtn')) closeModeMenu();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Tab' && e.shiftKey && !busy) {            // Shift+Tab cycles modes
+    e.preventDefault();
+    const next = MODES[(MODES.findIndex(m => m.id === currentMode) + 1) % MODES.length].id;
+    onMode(next); postMsg('setMode', { mode: next });
+    return;
+  }
+  if (!modeMenuOpen) return;
+  if (e.key === 'Escape') { closeModeMenu(); return; }
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    modeIdx = (modeIdx + (e.key === 'ArrowDown' ? 1 : -1) + MODES.length) % MODES.length;
+    renderModeMenu();
+  } else if (e.key === 'Enter') {
+    e.preventDefault(); e.stopPropagation();
+    chooseMode(MODES[modeIdx].id);
+  }
+}, true);
+onMode('auto');
+
+function onUserMsg(text, hasImages, id) {
+  if (hasImages) { const s = $id('imgStrip'); s.innerHTML = ''; s.classList.remove('show'); }
+  startTurn(text, !!hasImages, id);
+}
+$id('chat').addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('.user-restore');
+  if (b) { postMsg('restoreRequest', { id: b.dataset.id }); return; }
+  const more = e.target.closest && e.target.closest('.user-more');
+  if (more) {
+    const txt = more.parentElement.querySelector('.user-text');
+    const open = txt.classList.toggle('clamped') === false;
+    more.textContent = open ? 'Show less' : 'Show more';
+  }
+});
+
+let lastToolRow = null;
+
+function onStreamStart(modelName, iter) {
+  currentModelName = modelName||'';
+  setStreaming(true, currentModelName);
+  const el = addRow('', 'Assistant', '<span class="cursor"></span>',
+    { authorClass: 'asst', tag: currentModelName });
+  streamEl   = el;
+  streamText = '';
+}
+
+function onStreamDelta(content) {
+  if (!streamEl) return;
+  streamText += content;
+  streamEl.innerHTML = escHtml(streamText) + '<span class="cursor"></span>';
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+
+function onStreamEnd(cleanText) {
+  if (streamEl) {
+    // cleanText: text with leaked tool-call markup stripped by the extension
+    if (typeof cleanText === 'string') streamText = cleanText;
+    const row = streamEl.closest('.msg-row');
+    if (!streamText.trim()) {
+      if (row) row.remove();
+    } else {
+      streamEl.innerHTML = renderMd(streamText);
+      if (row) row.querySelector('.msg-dot')?.classList.add('done');
+    }
+    streamEl = null; streamText = '';
+  }
+  setStreaming(false);
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+
+function onError(text) {
+  addRow('err', 'Error', escHtml(text), { authorClass: 'err' });
+  setStreaming(false);
+}
+
+function onSystemMsg(md) {
+  addRow('system', 'System', renderMd(md||''), { authorClass: 'system' });
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+
+// The status pills (RAG on/off, role, errors, MCP tools, context tokens) were removed from the header:
+// they now live in the /analytics command. The extension still sends these messages, so they are ignored here.
+function onStatus() {}
+function onTokenUsage() {}
+
+function onClear() {
+  const chat = $id('chat');
+  chat.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty'; empty.id = 'empty';
+  empty.innerHTML = EMPTY_HTML;
+  chat.appendChild(empty);
+  for (const k in runCtx) delete runCtx[k];
+  turnBody = null;
+  setStreaming(false); streamEl = null; streamText = '';
+  $id('filePanel').classList.remove('show');
+}
+
+function onToolCall(name, args) {
+  const argsStr = Object.entries(args||{}).map(([k,v])=>k+'='+JSON.stringify(v).slice(0,50)).join(', ');
+  const el = addRow('tool',
+    '<span class="msg-author tool-name">⚙ '+escHtml(name)+'</span>',
+    '<div class="tool-call-row"><span class="tool-args">'+escHtml(argsStr)+'</span></div>',
+    { authorClass: '' }
+  );
+  lastToolRow = el;
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+
+function onToolResult(name, ok, output) {
+  if (!lastToolRow) return;
+  const div = document.createElement('div');
+  div.className = 'tool-result' + (ok?'':' fail');
+  const preview = output.length > 400 ? output.slice(0,400)+'\n…' : output;
+  div.textContent = preview;
+  lastToolRow.appendChild(div);
+  // Mark tool dot
+  const row = lastToolRow.closest('.msg-row');
+  if (row) {
+    const dot = row.querySelector('.msg-dot');
+    if (dot) dot.classList.add(ok ? 'done' : 'err');
+  }
+  $id('chat').scrollTop = $id('chat').scrollHeight;
+}
+
+function onHistory(messages) {
+  if (!messages||!messages.length) return;
+  messages.forEach(m => {
+    if (m.role === 'user') startTurn(m.content.split('\n[Attached image analysis')[0], false, m.id);
+    else if (m.role === 'assistant') {
+      const el = addRow('done', 'Assistant', renderMd(m.content), { authorClass:'asst' });
+    }
+  });
+}
+
+function onFilesDetected(files) {
+  if (!files||!files.length) return;
+  const list = $id('fileList');
+  list.innerHTML = files.map(f =>
+    '<div class="file-item"><span>'+escHtml(f.path)+'</span><span class="file-size">'+
+    (f.bytes/1024).toFixed(1)+' KB</span></div>'
+  ).join('');
+  $id('filePanel').classList.add('show');
+}
+
+function onFilesCreated(files) {
+  $id('filePanel').classList.remove('show');
+  onSystemMsg('✅ Created: ' + files.map(f=>'`'+f+'`').join('  '));
+}
+
+// Planning progress is an ordinary reply inside the turn of the message that started it (no banner above the chat)
+function onPlanningStart(task) { onSystemMsg('📋 Planning: ' + (task || '…')); }
+function onPlanningEnd() {}
+
+function onBattleStart(bmodels) {
+  battleTexts = ['',''];
+  $id('battleWrap').classList.add('show');
+  (bmodels||[]).forEach((m,i) => {
+    const t = $id('battleTitle'+i); if(t) t.textContent = m.name||('Model '+(i+1));
+    const b = $id('battleBody'+i); if(b) b.innerHTML = '<span class="cursor"></span>';
+    const c = $id('battleCol'+i); if(c) c.classList.remove('winner');
+  });
+  hideEmpty();
+}
+function onBattleDelta(idx, content) {
+  if (idx<0||idx>1) return;
+  battleTexts[idx] += content;
+  const b = $id('battleBody'+idx);
+  if (b) b.innerHTML = escHtml(battleTexts[idx])+'<span class="cursor"></span>';
+}
+function onBattleEnd(idx, error) {
+  const b = $id('battleBody'+idx);
+  if (!b) return;
+  b.innerHTML = error ? '<span style="color:var(--red)">'+escHtml(error)+'</span>' : renderMd(battleTexts[idx]||'');
+}
+function voteWinner(idx) {
+  $id('battleCol'+idx)?.classList.add('winner');
+  document.querySelectorAll('.battle-vote').forEach(v=>v.remove());
+}
+
+// ── Image attachment ────────────────────────────────────────────
+function attachImageFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const r = new FileReader();
+  r.onload = e => {
+    const b64 = e.target.result.replace(/^data:[^;]+;base64,/,'');
+    vscode.postMessage({ type:'imageAttach', data:b64 });
+    const url = URL.createObjectURL(file);
+    const meta = { name: file.name || 'image.png', url, w: 0, h: 0 };
+    const probe = new Image();
+    probe.onload = () => { meta.w = probe.naturalWidth; meta.h = probe.naturalHeight; };
+    probe.src = url;
+    attachedMeta.push(meta);
+    addImageThumb(url, meta);
+    refreshComposer();
+  };
+  r.readAsDataURL(file);
+}
+// What the user attached to the message being composed (shown as chips on the sent message)
+let attachedMeta = [], lastSentImages = [];
+// Images are attached to the message; text files become pinned context.
+function handleFiles(files) {
+  Array.from(files).forEach(f => {
+    if (f.type.startsWith('image/')) { attachImageFile(f); return; }
+    if (f.type.startsWith('audio/') || /\.(wav|mp3|ogg|oga|flac|m4a|aac|aiff?)$/i.test(f.name)) { attachAudioFile(f); return; }
+    if (f.size > 300000) { onSystemMsg('Skipped **' + f.name + '**: larger than 300 KB'); return; }
+    const r = new FileReader();
+    r.onload = e => {
+      const t = String(e.target.result);
+      if (t.includes('\u0000')) { onSystemMsg('Skipped **' + f.name + '**: not a text file'); return; }
+      pinItem(f.name, t.slice(0, 60000));
+    };
+    r.readAsText(f);
+  });
+}
+function onImageFile(input) {
+  handleFiles(input.files||[]);
+  input.value = '';
+}
+
+// ── "+" menu ───────────────────────────────────────────────────
+let plusOpen = false;
+function togglePlusMenu() { plusOpen ? closePlusMenu() : openPlusMenu(); }
+function openPlusMenu() {
+  closeModelMenu(); closeModeMenu(); hideSlashMenu();
+  plusOpen = true;
+  $id('plusMenu').classList.add('show');
+  $id('btnPlus').classList.add('open');
+}
+function closePlusMenu() {
+  plusOpen = false;
+  $id('plusMenu').classList.remove('show');
+  $id('btnPlus').classList.remove('open');
+}
+function plusAction(action) {
+  closePlusMenu();
+  if (action === 'upload') $id('imgFile').click();
+  else if (action === 'context') postMsg('addContext');
+  else postMsg('browseWeb');
+}
+document.addEventListener('mousedown', e => {
+  if (plusOpen && !e.target.closest('#plusMenu') && !e.target.closest('#btnPlus')) closePlusMenu();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && plusOpen) closePlusMenu(); });
+// Paste (Ctrl+V) and drag-drop screenshots into the input box
+$id('inp').addEventListener('paste', e => {
+  const files = Array.from(e.clipboardData?.items||[])
+    .filter(it => it.kind === 'file' && it.type.startsWith('image/'))
+    .map(it => it.getAsFile());
+  if (!files.length) return;
+  e.preventDefault();
+  files.forEach(attachImageFile);
+});
+$id('inp').addEventListener('dragover', e => {
+  if (Array.from(e.dataTransfer?.types||[]).includes('Files')) e.preventDefault();
+});
+$id('inp').addEventListener('drop', e => {
+  const files = Array.from(e.dataTransfer?.files||[]);
+  if (!files.length) return;
+  e.preventDefault();
+  handleFiles(files);
+});
+function addImageThumb(url, meta) {
+  const strip = $id('imgStrip');
+  strip.classList.add('show');
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;width:44px;height:44px;border-radius:4px;overflow:hidden;border:1px solid var(--bd)';
+  const img = document.createElement('img');
+  img.src = url; img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+  const rm = document.createElement('button');
+  rm.textContent = '×';
+  rm.style.cssText = 'position:absolute;top:0;right:0;background:rgba(0,0,0,.65);color:#fff;border:none;cursor:pointer;padding:0 3px;font-size:10px;line-height:1.4';
+  rm.onclick = () => {
+    const idx = attachedMeta.indexOf(meta);
+    if (idx >= 0) { attachedMeta.splice(idx, 1); vscode.postMessage({ type: 'removeImage', index: idx }); }
+    wrap.remove();
+    if (!strip.children.length) strip.classList.remove('show');
+  };
+  wrap.appendChild(img); wrap.appendChild(rm);
+  strip.appendChild(wrap);
+}
+
+// ── Slash commands ──────────────────────────────────────────────
+const SLASH_CMDS = [
+  { cmd:'/analytics',   desc:'Token usage, active hours, models and tools used' },
+  { cmd:'/new',         desc:'New conversation' },
+  { cmd:'/plan',        desc:'4-phase planning mode' },
+  { cmd:'/fix',         desc:'Auto-fix diagnostics in active file' },
+  { cmd:'/battle',      desc:'Compare 2 models side-by-side' },
+  { cmd:'/agent',       desc:'Switch agent role (developer, architect, reviewer…)' },
+  { cmd:'/subagent',    desc:'Orchestrate multi-role team on a task' },
+  { cmd:'/checkpoint',  desc:'save / list / restore conversation checkpoints' },
+  { cmd:'/fork',        desc:'Fork conversation from checkpoint' },
+  { cmd:'/knowledge',   desc:'Knowledge base: add / list / search' },
+  { cmd:'/sidecar',     desc:'Background processes: start / stop / list / logs' },
+  { cmd:'/orchestrate', desc:'Run a complex task with a team of sub-agents' },
+  { cmd:'/sdk',         desc:'Run Python SDK agent scripts' },
+  { cmd:'/pin',         desc:'Pin a file or text as context: list / clear' },
+  { cmd:'/revert',      desc:'Undo recorded file edits: last / N / all' },
+  { cmd:'/permissions', desc:'Show or clear "always allow" permissions' },
+  { cmd:'/rag',         desc:'Toggle RAG workspace search' },
+  { cmd:'/diag',        desc:'Show IDE diagnostics in chat' },
+  { cmd:'/terminal',    desc:'Show last terminal output' },
+  { cmd:'/security',    desc:'Toggle PolicyGuardian security checks' },
+  { cmd:'/model',       desc:'List models' },
+  { cmd:'/tools',       desc:'List available tools' },
+  { cmd:'/context',     desc:'Show system prompt context' },
+  { cmd:'/help',        desc:'All commands' },
+];
+
+function onInput(el) {
+  autoResize(el);
+  refreshComposer();
+  histIdx = -1;                       // typing leaves history browsing
+  const v = el.value;
+  if (v.startsWith('/') && !v.includes(' ')) {
+    const filter = v.toLowerCase();
+    const matches = SLASH_CMDS.filter(c => c.cmd.startsWith(filter));
+    showSlashMenu(matches);
+    hideMention();
+  } else {
+    hideSlashMenu();
+    detectMention(el);
+  }
+}
+
+// ── Input history (ArrowUp / ArrowDown recall earlier messages) ──
+let inputHistory = [], histIdx = -1, histDraft = '';
+function rememberInput(t) {
+  t = (t || '').trim();
+  if (!t) return;
+  if (inputHistory[inputHistory.length - 1] !== t) inputHistory.push(t);
+  if (inputHistory.length > 100) inputHistory.shift();
+  histIdx = -1;
+}
+function setInputValue(el, v) {
+  el.value = v;
+  autoResize(el);
+  el.setSelectionRange(v.length, v.length);
+}
+// returns true if the key was consumed
+function historyKey(e) {
+  const el = e.target;
+  if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+  if (e.key === 'ArrowUp' && inputHistory.length) {
+    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+    if (histIdx >= 0 || el.value === '' || atStart) {
+      e.preventDefault();
+      if (histIdx === -1) { histDraft = el.value; histIdx = inputHistory.length; }
+      if (histIdx > 0) { histIdx--; setInputValue(el, inputHistory[histIdx]); }
+      return true;
+    }
+  }
+  if (e.key === 'ArrowDown' && histIdx >= 0 && el.selectionStart === el.value.length) {
+    e.preventDefault();
+    histIdx++;
+    if (histIdx >= inputHistory.length) { histIdx = -1; setInputValue(el, histDraft); }
+    else setInputValue(el, inputHistory[histIdx]);
+    return true;
+  }
+  return false;
+}
+
+// ── @file mentions ─────────────────────────────────────────────
+let mention = null, mentionTimer = null;
+function detectMention(el) {
+  const caret = el.selectionStart;
+  const m = /(?:^|\s)@([^\s@]*)$/.exec(el.value.slice(0, caret));
+  if (!m) { hideMention(); return; }
+  const query = m[1];
+  const keep = mention && mention.query === query ? mention.items : [];
+  mention = { start: caret - query.length - 1, end: caret, query, items: keep, idx: 0 };
+  clearTimeout(mentionTimer);
+  mentionTimer = setTimeout(() => postMsg('fileSearch', { query }), 60);
+  if (keep.length) renderMention();
+}
+function onFileResults(query, files) {
+  if (!mention || mention.query !== query) return;   // stale answer for an older query
+  mention.items = files || [];
+  mention.items.forEach(it => seenPaths.add(it.path));
+  mention.idx = 0;
+  renderMention();
+}
+function renderMention() {
+  const menu = $id('mentionMenu');
+  if (!mention || !mention.items.length) { menu.classList.remove('show'); return; }
+  closeModelMenu(); closeModeMenu(); closePlusMenu(); hideSlashMenu();
+  menu.innerHTML = mention.items.map((it, i) => {
+    const p = it.path.replace(/\/$/, ''), k = p.lastIndexOf('/');
+    const name = p.slice(k + 1) + (it.dir ? '/' : ''), parent = k >= 0 ? p.slice(0, k + 1) : '';
+    return '<div class="mn-item' + (i === mention.idx ? ' active' : '') + '" data-i="' + i + '">' +
+      '<span class="mn-ico">' + (it.dir ? ICON_DIR : ICON_FILE) + '</span>' +
+      '<span class="mn-name">' + escHtml(name) + '</span>' +
+      '<span class="mn-dir">' + escHtml(parent) + '</span></div>';
+  }).join('');
+  menu.onmousedown = e => { e.preventDefault(); const it = e.target.closest('.mn-item'); if (it) selectMention(+it.dataset.i); };
+  menu.classList.add('show');
+  menu.querySelector('.mn-item.active')?.scrollIntoView({ block: 'nearest' });
+}
+const ICON_DIR  = '<svg viewBox="0 0 24 24"><path d="M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v8.8a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/></svg>';
+const ICON_FILE = '<svg viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 13h6M9 16.5h4"/></svg>';
+function hideMention() {
+  mention = null;
+  $id('mentionMenu').classList.remove('show');
+}
+function selectMention(i) {
+  if (!mention || !mention.items[i]) return;
+  const el = $id('inp'), v = el.value, it = mention.items[i];
+  // a folder keeps the menu open so you can browse into it; a file ends the mention with a space
+  const insert = '@' + it.path + (it.dir ? '' : ' ');
+  el.value = v.slice(0, mention.start) + insert + v.slice(mention.end);
+  const pos = mention.start + insert.length;
+  hideMention();
+  el.focus();
+  el.setSelectionRange(pos, pos);
+  autoResize(el);
+  if (it.dir) detectMention(el);
+}
+function mentionKey(e) {
+  if (!mention || !mention.items.length) return false;
+  const n = mention.items.length;
+  if (e.key === 'ArrowDown') { e.preventDefault(); mention.idx = (mention.idx + 1) % n; renderMention(); return true; }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); mention.idx = (mention.idx - 1 + n) % n; renderMention(); return true; }
+  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(mention.idx); return true; }
+  if (e.key === 'Escape') { e.preventDefault(); hideMention(); return true; }
+  return false;
+}
+function onKeyUp(e) {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) detectMention(e.target);
+}
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('#mentionMenu') && !e.target.closest('#inp')) hideMention();
+});
+
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('#slashMenu') && !e.target.closest('#inp') && !e.target.closest('[title="Commands"]')) hideSlashMenu();
+});
+function showSlashMenu(items) {
+  const menu = $id('slashMenu');
+  if (!items.length) { menu.classList.remove('show'); return; }
+  closeModelMenu(); closeModeMenu(); closePlusMenu();
+  menu.innerHTML = '<div class="mm-title"><span>Commands</span></div>' + items.map((c,i) =>
+    '<div class="slash-item" data-cmd="'+c.cmd+'" onclick="selectSlash(\''+c.cmd+'\')">' +
+    '<span class="scmd">'+c.cmd+'</span><span class="sdesc">'+escHtml(c.desc)+'</span></div>'
+  ).join('');
+  slashIdx = -1; menu.classList.add('show');
+}
+function hideSlashMenu() { $id('slashMenu').classList.remove('show'); slashIdx = -1; }
+function selectSlash(cmd) { $id('inp').value = cmd+' '; refreshMirror(); hideSlashMenu(); $id('inp').focus(); }
+
+function onKeyDown(e) {
+  if (mentionKey(e)) return;
+  const menu = $id('slashMenu');
+  if (menu.classList.contains('show')) {
+    const items = menu.querySelectorAll('.slash-item');
+    if (e.key==='ArrowDown') { e.preventDefault(); slashIdx=(slashIdx+1)%items.length; items.forEach((el,i)=>el.classList.toggle('active',i===slashIdx)); return; }
+    if (e.key==='ArrowUp')   { e.preventDefault(); slashIdx=(slashIdx-1+items.length)%items.length; items.forEach((el,i)=>el.classList.toggle('active',i===slashIdx)); return; }
+    if (e.key==='Enter'||e.key==='Tab') { e.preventDefault(); const a=slashIdx>=0?items[slashIdx]:items[0]; if(a) selectSlash(a.getAttribute('data-cmd')||''); return; }
+    if (e.key==='Escape') { hideSlashMenu(); return; }
+  }
+  if (historyKey(e)) return;
+  if (e.key === 'Enter' && !e.isComposing && !e.shiftKey) {   // Enter (or Ctrl+Enter) sends; Shift+Enter keeps the browser's new line
+    e.preventDefault();
+    send();
+  }
+}
+
+// ── Actions ────────────────────────────────────────────────────
+function send() {
+  const inp = $id('inp');
+  let text = inp.value.trim();
+  if (!text && audioMeta.length) text = 'Voice message';
+  if (!text) return;
+  if (recorder) stopRecording();
+  if (micOn) { setMic(false); postMsg('voice'); } // close the dictation overlay
+  rememberInput(text);
+  lastSentImages = attachedMeta; attachedMeta = [];
+  lastSentAudio = audioMeta; audioMeta = [];
+  $id('imgStrip').innerHTML = ''; $id('imgStrip').classList.remove('show');
+  inp.value = ''; autoResize(inp); hideSlashMenu(); hideMention();
+  vscode.postMessage({ type:'send', text });
+  refreshComposer();
+}
+function addModel()   { vscode.postMessage({type:'addModel'}); }
+function removeModel() {
+  if (activeModelId) vscode.postMessage({type:'removeModel',modelId:activeModelId}); // extension asks for confirmation
+}
+function newChat()     { closePanel(); vscode.postMessage({type:'newChat'}); }
+function discardFiles() { vscode.postMessage({type:'discardFiles'}); $id('filePanel').classList.remove('show'); }
+function autoResize(el) { el.style.height=''; el.style.height=Math.min(el.scrollHeight,120)+'px'; refreshMirror(); }
+
+// Draws the input text again in a layer behind the (transparent) textarea so known @files show as chips
+const seenPaths = new Set();
+// Escaped text where a leading slash command (/plan, /research…) and known @files carry the tag colour (.mt)
+function tagHtml(v) {
+  const spans = [];
+  const cmd = /^(\/[a-z][\w-]*)(?=\s|$)/i.exec(v);
+  let known = false;
+  try { known = !!cmd && SLASH_CMDS.some(c => c.cmd.toLowerCase() === cmd[1].toLowerCase()); } catch (e) { /* list not defined yet */ }
+  if (known) spans.push([0, cmd[1].length]);
+  const re = /(^|\s)(@[^\s@]+)/g;
+  let m;
+  while ((m = re.exec(v)) !== null) {
+    const tok = m[2];
+    if (!seenPaths.has(tok.slice(1).replace(/[),.;:!?]+$/, ''))) continue;   // only real files / folders
+    spans.push([m.index + m[1].length, m.index + m[1].length + tok.length]);
+  }
+  let out = '', last = 0;
+  for (const [s, e] of spans) {
+    out += escHtml(v.slice(last, s)) + '<span class="mt">' + escHtml(v.slice(s, e)) + '</span>';
+    last = e;
+  }
+  return out + escHtml(v.slice(last));
+}
+function refreshMirror() {
+  const el = $id('inp'), mir = $id('inpMirror');
+  if (!el || !mir) return;
+  mir.innerHTML = tagHtml(el.value) + '​';
+  mir.scrollTop = el.scrollTop;
+}
+
+// ── Pinned context panel ────────────────────────────────────────
+let pinnedItems = [];
+function pinItem(label, content) {
+  if (pinnedItems.find(p=>p.label===label)) return;
+  pinnedItems.push({label, content});
+  renderPins();
+  vscode.postMessage({type:'pinContext', label, content});
+}
+function unpinItem(label) {
+  pinnedItems = pinnedItems.filter(p=>p.label!==label);
+  renderPins();
+  vscode.postMessage({type:'unpinContext', label});
+}
+function clearAllPins() {
+  pinnedItems = [];
+  renderPins();
+  vscode.postMessage({type:'clearPinContext'});
+}
+function renderPins() {
+  const el = $id('pinList');
+  const panel = $id('pinPanel');
+  if (!pinnedItems.length) { panel.classList.remove('show'); return; }
+  panel.classList.add('show');
+  el.innerHTML = pinnedItems.map(p=>`
+    <div class="pin-item">
+      <span class="pin-item-label" title="${escHtml(p.content.slice(0,200))}">📌 ${escHtml(p.label)}</span>
+      <button class="pin-remove" onclick="unpinItem('${escHtml(p.label).replace(/'/g,"\\'")}')">✕</button>
+    </div>`).join('');
+}
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── Init ───────────────────────────────────────────────────────
+vscode.postMessage({ type:'ready' });
+</script>
+</body>
+</html>
