@@ -3,13 +3,15 @@ import * as vscode from 'vscode';
 export interface ModelConfig {
   id:       string;
   name:     string;
-  provider: 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'custom';
+  provider: 'ollama' | 'openai' | 'gemini' | 'openrouter' | 'custom' | 'webchat';
   baseUrl:  string;
   modelId:  string;
   description?: string;
   family?:  string;    // models sharing family + provider are one row in the picker
   variant?: string;    // label of this model on the row's slider, e.g. "Super 120B"
   audio?: boolean;   // accepts voice messages natively
+  vision?: boolean;  // looks at images itself: no separate vision model is asked first
+  webMode?: 'instant' | 'balanced' | 'thinking';   // web chat models with a Think switch (ChatGPT) or reasoning levels (Gemini)
 }
 
 export class ModelRegistry {
@@ -42,6 +44,17 @@ export class ModelRegistry {
     const id  = vscode.workspace.getConfiguration('ragAssistant').get<string>('audioModelId') ?? '';
     const all = this.getModels();
     return all.find(m => m.id === id) ?? all.find(m => m.audio);
+  }
+
+  // Where voice messages go when the audio model above is missing or fails: ChatGPT, then Gemini, on the web (both take audio files).
+  getWebAudioFallbacks(): ModelConfig[] {
+    const out: ModelConfig[] = [];
+    for (const site of ['chatgpt', 'gemini']) {
+      const web = this.getModels().filter(x => x.provider === 'webchat' && x.modelId === site);
+      const pick = web.find(x => x.webMode !== 'thinking') ?? web[0];
+      if (pick) out.push(pick);
+    }
+    return out;
   }
 
   async setActiveModel(id: string): Promise<void> {

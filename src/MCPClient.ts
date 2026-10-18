@@ -47,7 +47,7 @@ export interface MCPToolDef {
   _mcpServer: string; // which server owns this tool
 }
 
-class MCPServer {
+export class MCPServer {
   private proc?:         cp.ChildProcess;
   private pending =      new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void }>();
   private nextId  =      1;
@@ -121,7 +121,7 @@ class MCPServer {
     await this.call('initialize', {
       protocolVersion: '2024-11-05',
       capabilities:    {},
-      clientInfo:      { name: 'autopilot', version: '1.2.3' }
+      clientInfo:      { name: 'autopilot', version: '1.3.5' }
     }, 120_000);
     this.proc.stdin?.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n'); // a notification has no id
     this.reconnectCount = 0; // reset on successful connect
@@ -198,7 +198,7 @@ class MCPSSEServer {
   private async initialize(): Promise<void> {
     // POST initialize request to serverUrl
     await this.post({ jsonrpc: '2.0', id: this.nextId++, method: 'initialize',
-      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'autopilot', version: '1.2.3' } }
+      params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'autopilot', version: '1.3.5' } }
     });
     // Try to notify initialized (non-fatal)
     await this.post({ jsonrpc: '2.0', id: this.nextId++, method: 'notifications/initialized', params: null }).catch(() => {});

@@ -4,7 +4,7 @@ import * as nodePath from 'path';
 import { execFile } from 'child_process';
 import { AsyncLocalStorage } from 'async_hooks';
 import { ModelRegistry, ModelConfig }     from './ModelRegistry';
-import { LLMClient, ChatMessage, estimateTokens, truncateHistory, extractLeakedToolCalls } from './LLMClient';
+import { LLMClient, ChatMessage, estimateTokens, truncateHistory, extractLeakedToolCalls, inferBareToolCall } from './LLMClient';
 import { ToolRunner, TOOL_DEFS, SHELL_LABEL } from './ToolRunner';
 import { TrajectoryStore }                from './TrajectoryStore';
 import { SessionStore }                   from './SessionStore';
@@ -12,6 +12,9 @@ import { Analytics }                      from './Analytics';
 import { EditReview }                     from './EditReview';
 import { ShadowGit }                      from './ShadowGit';
 import { RESEARCH_TOOL_DEFS, RESEARCH_TOOL_NAMES } from './ResearchTools';
+import { PaperResearch, PAPER_TOOL_DEFS, PAPER_TOOL_NAMES } from './PaperResearch';
+import { stealthSearch, stealthFetch } from './BotasaurusSearch';
+import { disposeWebChats, SITE_NAMES } from './WebChat';
 import { KnowledgeBase }                  from './KnowledgeBase';
 import { DiagnosticsCollector }           from './DiagnosticsCollector';
 import { PromptAssembler, AgentRole, AGENT_PROMPTS } from './PromptAssembler';
@@ -112,6 +115,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     this.analytics    = new Analytics(ctx);
     this.review       = new EditReview();
     ctx.subscriptions.push(this.review);
+    ctx.subscriptions.push({ dispose: () => disposeWebChats() });
     // A file the agent changed shows up in the chat with its +/- counts and Accept / Revert; later decisions update the same card
     ctx.subscriptions.push(this.review.onDidUpdate(u => this.post({
       type: 'fileChanged', path: u.fsPath, rel: vscode.workspace.asRelativePath(u.fsPath), state: u.state,
@@ -119,7 +123,8 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     })));
     this.configureLlm(this.baseLlm);
     ctx.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('ragAssistant.openRouterAppUrl') || e.affectsConfiguration('ragAssistant.openRouterCategories')) {
+      if (e.affectsConfiguration('ragAssistant.models') || e.affectsConfiguration('ragAssistant.activeModelId')) this.postModels();     // the picker follows the settings
+      if (e.affectsConfiguration('ragAssistant.openRouterAppUrl') || e.affectsConfiguration('ragAssistant.openRouterCategories') || e.affectsConfiguration('ragAssistant.webChatSites')) {
         for (const c of [this.baseLlm, ...[...this.activeRuns.values()].map(r => r.llm)]) this.configureLlm(c);
       }
     }));
@@ -128,10 +133,16 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     const savedMode   = ctx.globalState.get<string>('ragAssistant.mode');
     if (savedMode === 'manual' || savedMode === 'edit' || savedMode === 'plan' || savedMode === 'research' || savedMode === 'auto') this.mode = savedMode;
     // credentials for the research tools: secret storage first, environment variables as a fallback
+    this.tools.stealthFetch = async (url, maxChars) => {
+      if (!this.stealthEnabled()) throw new Error('The page blocked the request and the stealth browser is switched off (ragAssistant.stealthBrowser).');
+      const r = await stealthFetch(url, maxChars, this.stealthOpts());
+      return `[${r.title || r.url}]\n${r.text}`;
+    };
     this.tools.researchOpts = async () => ({
       githubToken: (await ctx.secrets.get('ragAssistant:githubToken')) || process.env['GITHUB_TOKEN'] || undefined,
       brightKey:   (await ctx.secrets.get('ragAssistant:brightDataKey')) || process.env['BRIGHTDATA_API_KEY'] || undefined,
       brightZone:  vscode.workspace.getConfiguration('ragAssistant').get<string>('brightDataZone') || process.env['BRIGHTDATA_ZONE'] || undefined,
+      stealthSearch: this.stealthEnabled() ? (q, n) => stealthSearch(q, n, this.stealthOpts()) : undefined,
       workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
     });
     this.sidecar      = new SidecarManager();
@@ -235,6 +246,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         break;
       }
       case 'restoreRequest': await this.requestRestore(String(msg.id ?? '')); break;
+      case 'openFile': await this.openFileFromChat(String(msg.path ?? '')); break;
       case 'openResearch': {
         const found = await this.readResearch();
         const dir = this.planDir();
@@ -746,6 +758,32 @@ export class ChatProvider implements vscode.WebviewViewProvider {
   }
 
   /** Stop / new chat / webview reload: never leave the agent waiting on a card nobody can answer. */
+  /** A file name clicked in a reply: opens it in the editor in a new tab (at the line, if one is given). Binary files open in their viewer. */
+  private async openFileFromChat(raw: string): Promise<void> {
+    const m = /^(.+?)(?::(\d+)(?:[-:](\d+))?)?$/.exec(raw.trim());
+    const wanted = (m ? m[1] : raw).trim();
+    if (!wanted) return;
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    let file: string | undefined;
+    for (const c of nodePath.isAbsolute(wanted) ? [wanted] : [root && nodePath.join(root, wanted), wanted.startsWith('~') ? nodePath.join(require('os').homedir(), wanted.slice(1)) : undefined]) {
+      if (c && fs.existsSync(c) && fs.statSync(c).isFile()) { file = c; break; }
+    }
+    if (!file) {                                                  // the model often names a file without its folder
+      const tail = wanted.replace(/\\/g, '/').replace(/^\.?\//, '');
+      const hits = await vscode.workspace.findFiles('**/' + nodePath.basename(tail), '**/{node_modules,.git}/**', 20);
+      file = hits.map(u => u.fsPath).find(p => p.replace(/\\/g, '/').endsWith('/' + tail)) ?? hits[0]?.fsPath;
+    }
+    if (!file) { this.showInfo(`File not found: \`${wanted}\``); return; }
+    const uri = vscode.Uri.file(file);
+    const line = m?.[2] ? Math.max(0, Number(m[2]) - 1) : undefined;
+    if (/\.(pdf|png|jpe?g|gif|webp|bmp|ico|zip|gz|7z|exe|dll|mp3|mp4|wav|woff2?|ttf|otf|docx?|xlsx?|pptx?)$/i.test(file)) {
+      await vscode.commands.executeCommand('vscode.open', uri, { preview: false });
+      return;
+    }
+    const sel = line === undefined ? undefined : new vscode.Range(line, 0, line, 0);
+    await vscode.window.showTextDocument(uri, { preview: false, selection: sel });   // preview:false = its own, permanent tab
+  }
+
   private cancelPermissions(): void {
     for (const answer of [...this.pendingPerms.values()]) answer({ choice: 'skip' });
   }
@@ -812,7 +850,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     ];
     let out = '';
     let err = '';
-    await this.llm.streamChat(listener, key, msgs, { maxTokens: 2048, temperature: 0.1 }, c => {
+    await this.llm.streamChat(listener, key, msgs, { maxTokens: 2048, temperature: 0.1, helper: 'audio' }, c => {
       if (c.type === 'delta' && c.content) out += c.content;
       else if (c.type === 'error') err = c.error ?? 'stream error';
     });
@@ -874,6 +912,22 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     c.onUsage              = (m, p, o) => this.analytics.usage(m, p, o);
     c.openRouterReferer    = cfg.get<string>('openRouterAppUrl') || undefined;
     c.openRouterCategories = cfg.get<string>('openRouterCategories') || undefined;
+    c.onWebChat   = (site, name) => this.allowWebChat(site, name);
+    c.webConvo    = this.sessions.current().id;                 // one Autopilot session = one chat on the website
+    c.webMaxChars = cfg.get<number>('webChatMaxChars') ?? 120_000;
+    c.webStore    = {
+      get: (site, convo) => (this.ctx.globalState.get<Record<string, unknown>>('ragAssistant.webChats') ?? {})[site + '|' + convo] as never,
+      set: (site, convo, state) => {
+        const all = { ...(this.ctx.globalState.get<Record<string, unknown>>('ragAssistant.webChats') ?? {}) };
+        all[site + '|' + convo] = state;
+        const keys = Object.keys(all);
+        for (const k of keys.slice(0, Math.max(0, keys.length - 200))) delete all[k];          // keep the newest 200
+        void this.ctx.globalState.update('ragAssistant.webChats', all);
+      }
+    };
+    c.onNotice    = m => this.showInfo('🔐 ' + m);
+    c.onProgress  = m => this.showInfo('🌐 ' + m);
+    c.webOverrides = cfg.get<Record<string, Record<string, unknown>>>('webChatSites') as never;
   }
 
   /** Tags the message with the run that produced it, so the chat puts it under the right user message. */
@@ -1026,7 +1080,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
 
       // Images are analyzed by the vision model (Gemma 4); the selected model still writes the reply.
       const vision = this.registry.getVisionModel();
-      if (vision && vision.id !== model.id) {
+      if (vision && vision.id !== model.id && !model.vision) {
         this.streaming = true;
         posted = true;
         this.postUser(bubble, true, userMsg.id);
@@ -1054,21 +1108,35 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         turnAudio = clips;
         userMsg.content = `${text}\n\n[Voice message attached: listen to it and respond to what it says.]`;
       } else {
-        const listener = this.registry.getAudioModel();
-        if (!listener) {
-          userMsg.content = `${text}\n\n[A voice message was attached but no audio model is configured. Set "audio": true on a model in ragAssistant.models.]`;
+        // The default audio model first; when it is missing or fails, ChatGPT and then Gemini on the web (they hear audio files).
+        const first = this.registry.getAudioModel();
+        const listeners = [first, ...this.registry.getWebAudioFallbacks().filter(w => w.id !== first?.id)].filter((x): x is ModelConfig => !!x);
+        if (!listeners.length) {
+          userMsg.content = `${text}
+
+[A voice message was attached but no audio model is configured. Set "audio": true on a model in ragAssistant.models.]`;
           this.post({ type: 'error', text: 'No audio model configured: add "audio": true to a model in ragAssistant.models (e.g. Gemma 4 26B).' });
         } else {
           this.streaming = true;
           if (!posted) { posted = true; this.postUser(bubble, !!userMsg.images?.length, userMsg.id); }
-          this.post({ type: 'systemMessage', text: `🎤 Listening with **${listener.name}**, reply will use **${model.name}**…` });
-          try {
-            const heard = await this.describeAudio(listener, model, apiKey, clips);
-            userMsg.content = `${text}\n\n[Voice message transcript by ${listener.name}]\n${heard}`;
-          } catch (e) {
-            const m = e instanceof Error ? e.message : String(e);
-            this.post({ type: 'error', text: `Could not listen to the voice message (${listener.name}): ${m}` });
-            userMsg.content = `${text}\n\n[A voice message was attached but could not be transcribed: ${m}]`;
+          let heard = '', by: ModelConfig | undefined, lastErr = '';
+          for (const listener of listeners) {
+            this.post({ type: 'systemMessage', text: `🎤 Listening with **${listener.name}**, reply will use **${model.name}**…` });
+            try { heard = await this.describeAudio(listener, model, apiKey, clips); by = listener; break; }
+            catch (e) {
+              lastErr = e instanceof Error ? e.message : String(e);
+              this.post({ type: 'systemMessage', text: `⚠️ ${listener.name} could not listen: ${lastErr.slice(0, 200)}${listener !== listeners[listeners.length - 1] ? ' Trying ' + listeners[listeners.indexOf(listener) + 1].name + '…' : ''}` });
+            }
+          }
+          if (by) userMsg.content = `${text}
+
+[Voice message transcript by ${by.name}]
+${heard}`;
+          else {
+            this.post({ type: 'error', text: `Could not listen to the voice message: ${lastErr}` });
+            userMsg.content = `${text}
+
+[A voice message was attached but could not be transcribed: ${lastErr}]`;
           }
         }
       }
@@ -1108,7 +1176,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
       `\n\n<bug-fixing>Errors are yours to fix, not to report. When a command, build or test fails, or an edit leaves [LINT] errors: ` +
       `read the real error output, locate the cause in the code it points to, fix it, then run the same command again, and repeat until it passes. ` +
       `Never end your turn on a failing command or on files with errors. Builds can be slow: pass a larger timeout (up to 600000 ms) or background:true for ` +
-      `cargo/npm/gradle. After editing code, check get_diagnostics. If you are truly blocked, say exactly what is wrong and what you need.</bug-fixing>` +
+      `cargo/npm/gradle. If the error text alone does not show the fix, call stackoverflow_search with the core of the message (no file paths) and apply what the accepted answer says. After editing code, check get_diagnostics. If you are truly blocked, say exactly what is wrong and what you need.</bug-fixing>` +
       `\n\n<answering>Always answer the user's LAST message, and only that one. Earlier requests that were interrupted ` +
       `are not to be resumed unless the user asks. When the last message includes an image analysis, base your answer on it.</answering>`;
     if (this.mode === 'plan') {
@@ -1226,6 +1294,11 @@ export class ChatProvider implements vscode.WebviewViewProvider {
           toolCalls.push(...leaked.calls);
           accumulated = leaked.text;
           cleanText = leaked.text;
+        } else if (iter > 0 && inferBareToolCall(accumulated, allToolDefs)) {
+          const bare = inferBareToolCall(accumulated, allToolDefs)!;      // the turn was only a call's arguments: run that call
+          toolCalls.push(bare);
+          accumulated = '';
+          cleanText = '';
         } else if (leaked.unparsed.length) {
           this.post({
             type: 'error',
@@ -1506,7 +1579,9 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     allowed: Set<string>, defs: Array<{ function: { name: string; parameters: { properties?: Record<string, unknown> } } }>,
     maxIters: number, maxTokens: number,
     // Returns a corrective instruction when the model's answer is not an acceptable final report, otherwise null.
-    validate?: (text: string, used: Set<string>) => string | null
+    validate?: (text: string, used: Set<string>) => string | null,
+    // Answers a tool call itself (the paper tools); undefined = use the normal tool runner
+    extra?: (name: string, args: Record<string, unknown>) => Promise<{ ok: boolean; output: string } | undefined>
   ): Promise<string> {
     const used = new Set<string>();
     let nudges = 2;
@@ -1518,6 +1593,7 @@ export class ChatProvider implements vscode.WebviewViewProvider {
       { role: 'user', content: userPrompt }
     ];
     let last = '';
+    const gathered: string[] = [];                       // what the tools returned, in case the model never writes the report
     for (let i = 0; i < maxIters && !this.stopRequested; i++) {
       let out = '';
       const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
@@ -1550,11 +1626,14 @@ export class ChatProvider implements vscode.WebviewViewProvider {
         this.runTools++;
         this.analytics.tool(call.name);
         this.post({ type: 'toolCall', name: call.name, args: call.args });
-        const r = allowed.has(call.name)
-          ? await this.tools.run({ name: call.name, arguments: call.args })
-          : { toolName: call.name, ok: false, output: `"${call.name}" is not available while researching (read-only).` };
+        const handled = await extra?.(call.name, call.args);
+        const r = handled ? { toolName: call.name, ...handled }
+          : allowed.has(call.name)
+            ? await this.tools.run({ name: call.name, arguments: call.args })
+            : { toolName: call.name, ok: false, output: `"${call.name}" is not available while researching (read-only).` };
         this.post({ type: 'toolResult', name: call.name, ok: r.ok, output: r.output });
         results.push(`[Tool: ${call.name}]\n${r.output.slice(0, 12000)}`);
+        if (r.ok && gathered.join('').length < 9000) gathered.push(`[${call.name} ${JSON.stringify(call.args).slice(0, 160)}]\n${r.output.slice(0, 1800)}`);
       }
       msgs.push({ role: 'user', content: results.join('\n\n') || 'No usable tool results.' });
     }
@@ -1566,7 +1645,17 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     await this.llm.streamChat(model, apiKey, msgs, { maxTokens, temperature: 0.2 }, c => {
       if (c.type === 'delta' && c.content) report += c.content;
     });
-    return report || last || '(no report produced)';
+    if (!report.trim()) {                                // an empty answer (a reasoning model that only thought): ask once more, shorter
+      msgs.push({ role: 'user', content: 'Your last answer was empty. Reply now with the Markdown document only, starting with its first heading.' });
+      await this.llm.streamChat(model, apiKey, msgs, { maxTokens, temperature: 0.4 }, c => {
+        if (c.type === 'delta' && c.content) report += c.content;
+      });
+    }
+    if (report.trim()) return report.trim();
+    if (last.trim()) return last.trim();
+    return gathered.length
+      ? `# Research: raw findings\n\n_The model did not write the report; these are the tool results it gathered._\n\n${gathered.join('\n\n---\n\n')}`
+      : '(no report produced)';
   }
 
   private static readonly LOCAL_READ_ONLY = new Set(['view_file', 'read_multiple_files', 'list_directory', 'grep_search', 'search_symbol', 'get_file_outline']);
@@ -1594,6 +1683,40 @@ export class ChatProvider implements vscode.WebviewViewProvider {
     this.sessions.saveCurrent(this.history);
     this.postSessionInfo();
     await this.withRun(() => this.doResearchInner(text));
+  }
+
+  /** Claude, ChatGPT and Gemini are used through their websites with the user's own account: ask once, plainly, before the first use. */
+  private async allowWebChat(site: string, name: string): Promise<boolean> {
+    const key = 'ragAssistant.webchatConsent.' + site;
+    if (this.ctx.globalState.get<boolean>(key)) return true;
+    const pick = await vscode.window.showWarningMessage(
+      `Use ${(SITE_NAMES as Record<string, string>)[site] ?? name} as a model? Autopilot will drive the website in a Chrome window with your own account (you sign in yourself, Autopilot never sees the password). ` +
+      `Automating these sites may go against their terms of service, and the account can be limited or suspended. The official APIs are the supported way ` +
+      `(Anthropic, OpenAI and Gemini keys, or Claude through OpenRouter).`,
+      { modal: true }, 'I understand, continue');
+    if (!pick) return false;
+    await this.ctx.globalState.update(key, true);
+    return true;
+  }
+
+  /** Botasaurus (a real Chrome with anti-detection) for blocked searches and challenge pages: ragAssistant.stealthBrowser, on by default. */
+  private stealthEnabled(): boolean { return vscode.workspace.getConfiguration('ragAssistant').get<boolean>('stealthBrowser') !== false; }
+  private stealthOpts() {
+    return { progress: (m: string) => this.showInfo('🕵 ' + m), proxy: vscode.workspace.getConfiguration('ragAssistant').get<string>('searchProxy') || process.env['RAG_SEARCH_PROXY'] || undefined };
+  }
+
+  /** Running tests in .rag/prototype: asked once per research run, "always allow" is remembered like for other commands. */
+  private async allowPrototypeRun(command: string): Promise<boolean> {
+    const key = 'prototype_run';
+    if (this.allowList('project').includes(key) || this.allowList('global').includes(key)) return true;
+    const reply = await this.requestPermission('run_command', { command: `${command}\n(runs in .rag/prototype: tests the code rebuilt from the paper)` }, key);
+    const resolved = (label: string) => this.post({ type: 'cardResolved', id: reply.id, label });
+    switch (reply.choice) {
+      case 'project': await this.addAllow('project', key); resolved("✓ Allowed: always run prototype tests in this project"); return true;
+      case 'global':  await this.addAllow('global', key);  resolved('✓ Allowed: always run prototype tests'); return true;
+      case 'once':    resolved('✓ Allowed for this research'); return true;
+      default:        resolved('✕ Not allowed'); return false;
+    }
   }
 
   private async readResearch(): Promise<{ text: string; rel: string } | undefined> {
@@ -1633,10 +1756,31 @@ export class ChatProvider implements vscode.WebviewViewProvider {
 
     // ── 2/3 Find matching reference code for each requirement ────────
     this.showInfo('🔎 Research 2/3 — finding reference code for each requirement…');
-    const allowed = new Set<string>([...ChatProvider.LOCAL_READ_ONLY, 'web_fetch', ...RESEARCH_TOOL_NAMES]);
-    const defs = [...TOOL_DEFS.filter(d => allowed.has(d.function.name)), ...RESEARCH_TOOL_DEFS];
+    const allowed = new Set<string>([...ChatProvider.LOCAL_READ_ONLY, 'web_fetch', ...RESEARCH_TOOL_NAMES, ...PAPER_TOOL_NAMES]);
+    const defs = [...TOOL_DEFS.filter(d => allowed.has(d.function.name)), ...RESEARCH_TOOL_DEFS, ...PAPER_TOOL_DEFS];
+    // Second route, only when GitHub has no implementation: learn the method from a paper, rebuild it, test it
+    const paper = new PaperResearch({
+      workspaceRoot: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+      sessionId:     this.sessions.current().id,
+      vet:           c => getPolicyGuardian().vet(c),
+      allowRun:      c => this.allowPrototypeRun(c),
+      progress:      m => this.showInfo('📚 ' + m)
+    });
+    const askedForPapers = PaperResearch.wantsPapers(task);
+    if (askedForPapers) paper.unlocked = true;            // the user wants journals themselves: no GitHub detour
+    const githubTools = new Set(['github_search_repositories', 'github_fetch_top_repositories']);
+    const extra = async (name: string, args: Record<string, unknown>) => {
+      if (PAPER_TOOL_NAMES.has(name)) return paper.run(name, args);
+      if (githubTools.has(name)) {                                   // GitHub came back empty twice -> the paper tools unlock
+        const r = await this.tools.run({ name, arguments: args });
+        return { ok: r.ok, output: r.ok ? r.output + paper.noteGithubSearch() : r.output };
+      }
+      return undefined;
+    };
 
-    const report = await this.runReadOnlyAgent(model, apiKey, ragCtx,
+    let report: string;
+    try {
+    report = await this.runReadOnlyAgent(model, apiKey, ragCtx,
       `You are the RESEARCHER of a coding assistant.\n\nUser request:\n"${task}"\n\nRequirements already agreed:\n${breakdown}\n\n` +
       `The user has NO reference code for this. For EACH requirement, find code that implements it and capture the actual functions.\n` +
       `Tools: github_fetch_top_repositories (PREFERRED: finds the most starred repositories for a topic, downloads them as zip and extracts them under .rag/references; ` +
@@ -1649,6 +1793,15 @@ export class ChatProvider implements vscode.WebviewViewProvider {
       `(each ≤ 60 lines, no paraphrasing) together with its path under .rag/references/ and its line numbers; ` +
       `4) look up the documentation of the dependencies involved with package_info / google_search (only a few queries: searches get throttled). ` +
       `Do not repeat the same tool call.\n\n` +
+      (askedForPapers ? `The user explicitly asked for papers or journals, so the paper tools are ALREADY UNLOCKED: start with scholar_search, read the best papers with paper_read, and report them (title, authors, year, link, what the method does). ` : '') +
+      `PAPER ROUTE, only for a requirement that NO GitHub repository implements (you searched GitHub with at least two keyword variants and nothing fits). ` +
+      `The paper tools are locked until then: they unlock by themselves after two empty GitHub searches, or call scholar_unlock with the reason. Never use them when a GitHub reference exists. ` +
+      `a) scholar_search the method (Google Scholar; it falls back to OpenAlex and arXiv by itself) and pick the 1-3 most relevant, best cited papers. ` +
+      `b) paper_read them (an arXiv id; continue with offset) and STUDY the system: data structures, algorithm steps, formulas, parameters. ` +
+      `c) REIMPLEMENT the method in this project's language: prototype_write the implementation and a small test that checks the behaviour the paper describes. ` +
+      `d) TEST it with prototype_run; exit code 0 means it works. If it fails: read the error, call stackoverflow_search with the core of the error message (no file paths), apply the fix, run again. ` +
+      `If two Stack Overflow searches did not solve it, use google_search with "site:stackoverflow.com <error>". Repeat until it passes, at most 6 fix cycles, and note each error with the link that fixed it. ` +
+      `Only code that PASSED its test goes into the report; if it never passed, say so plainly.\n\n` +
       `Your LAST message is the final answer, a Markdown document saved as Research.md and read by the planner. ` +
       `No preamble, never a placeholder. Use exactly this structure:\n` +
       `# Research: <short title>\n` +
@@ -1660,13 +1813,23 @@ export class ChatProvider implements vscode.WebviewViewProvider {
       `\`\`\`<language>\n<the exact function code copied from github_file_content>\n\`\`\`\n` +
       `- Adapt: what must change to fit this project\n` +
       `(repeat for every requirement; several candidates are fine; if no code was found say so)\n` +
+      `## Paper-based reimplementation\n(ONLY for requirements that had no GitHub reference; omit the section otherwise)\n` +
+      `### R<n> — <title>\n- Paper: <title> — <authors>, <year> · <url>\n- Method: 3-6 bullets (steps, formulas, parameters)\n` +
+      `- Prototype: \`.rag/prototype/<session>/<file>\` · Test: \`<command>\` → PASS or FAIL (exit code and the key output line)\n` +
+      `\`\`\`<language>\n<the exact code that was run, ≤ 60 lines>\n\`\`\`\n- Fixes: each error met and the Stack Overflow link that solved it\n- Adapt: what must change to fit this project\n` +
       `## Dependencies and documentation\n(name, version, key APIs, links)\n` +
       `## Mapping\n| Requirement | Reference function | Implement in (this project) |\n` +
       `## Risks and open questions\n` +
       `## Implementation approach\n(ordered bullets the planner can turn into steps)\n\n` +
       `Cite every source as a URL or repo/path and never invent code or facts.`,
-      allowed, defs, 18, 6000,
+      allowed, defs, 36, 6000,
       (text, used) => {
+        if (paper.prototypeRuns.length && !/^##\s*Paper-based reimplementation/mi.test(text)) {
+          return 'You tested a reimplementation, so the report needs the section "## Paper-based reimplementation": paper, method, the code that was run and its test result.';
+        }
+        if (/\bPASS(ED)?\b/.test(text) && paper.prototypeRuns.length && !paper.prototypeRuns.some(r => r.ok)) {
+          return 'The report says PASS, but no prototype_run finished with exit code 0. Run the test again until it passes, or report FAIL honestly with the error.';
+        }
         const usedRepos = used.has('github_fetch_top_repositories') || used.has('github_download_repository');
         const usedFile  = used.has('view_file') || used.has('read_multiple_files') || used.has('github_file_content');
         if (text.trim().length < 900 || !/^#\s*Research/mi.test(text) || !/^##\s*Reference code/mi.test(text) || !text.includes('```')) {
@@ -1677,8 +1840,20 @@ export class ChatProvider implements vscode.WebviewViewProvider {
             'that contains the actual function code in fenced code blocks, then the remaining sections.';
         }
         return null;
-      });
+      }, extra);
+    } finally {
+      paper.dispose();                                            // stops the Google Scholar MCP server, if it was started
+    }
     if (this.stopRequested) return;
+    if (!report.trim() || report.trim() === '(no report produced)') {
+      this.runOutcome = 'error';
+      this.post({ type: 'error', text: `${model.name} produced no research report (it returned nothing). Nothing was saved: send the request again, or switch model.` });
+      return;
+    }
+    if (/^# Research: raw findings/.test(report.trim())) {
+      this.post({ type: 'error', text: `${model.name} did not write the report. The raw tool results were saved instead: treat Research.md as notes, or send the request again.` });
+      this.runOutcome = 'error';
+    }
 
     // ── 3/3 Save Research.md for the planner ─────────────────────────
     this.showInfo('📝 Research 3/3 — saving Research.md…');

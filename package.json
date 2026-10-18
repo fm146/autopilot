@@ -2,7 +2,7 @@
   "name": "autopilot",
   "displayName": "Autopilot",
   "description": "Autopilot - an AI coding assistant made from reverse engineered Jetski RAG architecture",
-  "version": "1.2.3",
+  "version": "1.3.5",
   "publisher": "hintstechnology",
   "author": "Hints Technology",
   "license": "BSD-2-Clause",
@@ -210,6 +210,107 @@
               "description": "Smaller Inkling, quicker answers",
               "family": "Inkling",
               "variant": "276B"
+            },
+            {
+              "id": "web-claude",
+              "name": "Claude Fast (Anthropic)",
+              "provider": "webchat",
+              "baseUrl": "https://claude.ai",
+              "modelId": "claude",
+              "family": "Claude",
+              "variant": "Fast",
+              "webMode": "instant",
+              "vision": true,
+              "description": "Your claude.ai account, effort Low: quick answers. Sees images, takes files"
+            },
+            {
+              "id": "web-claude-balanced",
+              "name": "Claude Balanced (Anthropic)",
+              "provider": "webchat",
+              "baseUrl": "https://claude.ai",
+              "modelId": "claude",
+              "family": "Claude",
+              "variant": "Balanced",
+              "webMode": "balanced",
+              "vision": true,
+              "description": "Your claude.ai account, effort Medium (Claude's recommended level)"
+            },
+            {
+              "id": "web-claude-deep",
+              "name": "Claude Deep (Anthropic)",
+              "provider": "webchat",
+              "baseUrl": "https://claude.ai",
+              "modelId": "claude",
+              "family": "Claude",
+              "variant": "Deep",
+              "webMode": "thinking",
+              "vision": true,
+              "description": "Your claude.ai account, effort High: more thorough, slower"
+            },
+            {
+              "id": "web-chatgpt",
+              "name": "ChatGPT Instant (OpenAI)",
+              "provider": "webchat",
+              "baseUrl": "https://chatgpt.com",
+              "modelId": "chatgpt",
+              "family": "ChatGPT",
+              "variant": "Instant",
+              "webMode": "instant",
+              "audio": true,
+              "vision": true,
+              "description": "Your chatgpt.com account, answers right away (Think switch off). Sees images, hears audio, takes files"
+            },
+            {
+              "id": "web-chatgpt-thinking",
+              "name": "ChatGPT Thinking (OpenAI)",
+              "provider": "webchat",
+              "baseUrl": "https://chatgpt.com",
+              "modelId": "chatgpt",
+              "family": "ChatGPT",
+              "variant": "Thinking",
+              "webMode": "thinking",
+              "audio": true,
+              "vision": true,
+              "description": "Your chatgpt.com account with the Think switch on: slower, reasons before answering"
+            },
+            {
+              "id": "web-gemini",
+              "name": "Gemini Fast (Google)",
+              "provider": "webchat",
+              "baseUrl": "https://gemini.google.com",
+              "modelId": "gemini",
+              "family": "Gemini",
+              "variant": "Fast",
+              "webMode": "instant",
+              "audio": true,
+              "vision": true,
+              "description": "Your gemini.google.com account, reasoning level Low: quick answers. Sees images, hears audio, takes files"
+            },
+            {
+              "id": "web-gemini-balanced",
+              "name": "Gemini Balanced (Google)",
+              "provider": "webchat",
+              "baseUrl": "https://gemini.google.com",
+              "modelId": "gemini",
+              "family": "Gemini",
+              "variant": "Balanced",
+              "webMode": "balanced",
+              "audio": true,
+              "vision": true,
+              "description": "Your gemini.google.com account, reasoning level Medium: balanced depth"
+            },
+            {
+              "id": "web-gemini-deep",
+              "name": "Gemini Deep (Google)",
+              "provider": "webchat",
+              "baseUrl": "https://gemini.google.com",
+              "modelId": "gemini",
+              "family": "Gemini",
+              "variant": "Deep",
+              "webMode": "thinking",
+              "audio": true,
+              "vision": true,
+              "description": "Your gemini.google.com account, reasoning level High: thorough, slower"
             }
           ],
           "description": "Configured AI models. API keys are stored in VS Code's secure secret storage.",
@@ -236,7 +337,8 @@
                   "openai",
                   "gemini",
                   "openrouter",
-                  "custom"
+                  "custom",
+                  "webchat"
                 ]
               },
               "baseUrl": {
@@ -254,6 +356,15 @@
               "audio": {
                 "type": "boolean",
                 "description": "The model accepts voice messages (audio) directly"
+              },
+              "vision": {
+                "type": "boolean",
+                "description": "The model looks at images itself (no separate vision model is used)"
+              },
+              "webMode": {
+                "type": "string",
+                "enum": ["instant", "balanced", "thinking"],
+                "description": "Web chat models: ChatGPT has a Think switch (instant / thinking), Gemini and Claude three reasoning levels (instant = Low, balanced = Medium, thinking = High)"
               },
               "family": {
                 "type": "string",
@@ -349,6 +460,26 @@
           "type": "string",
           "default": "",
           "description": "OpenRouter app categories sent with every request (max 2, comma separated, e.g. ide-extension,cli-agent). OpenRouter's agent-only free models check them. Default: ide-extension,cli-agent"
+        },
+        "ragAssistant.stealthBrowser": {
+          "type": "boolean",
+          "default": true,
+          "description": "When Google and DuckDuckGo block web searches, or a page answers with a bot challenge, retry through Botasaurus, a real Chrome with anti-detection. Needs Chrome and Python 3.10+; Botasaurus is installed on first use."
+        },
+        "ragAssistant.searchProxy": {
+          "type": "string",
+          "default": "",
+          "description": "Optional proxy for the stealth browser, e.g. http://user:pass@host:port. Helps when your IP address itself is blocked."
+        },
+        "ragAssistant.webChatSites": {
+          "type": "object",
+          "default": {},
+          "description": "Patch the page selectors used for Claude, ChatGPT and Gemini when a website changes its layout, e.g. {\"chatgpt\": {\"input\": [\"#prompt-textarea\"], \"send\": [\"button[data-testid=send-button]\"]}}. Fields: url, input, send, assistant, streaming (lists of CSS selectors)."
+        },
+        "ragAssistant.webChatMaxChars": {
+          "type": "number",
+          "default": 120000,
+          "description": "Claude, ChatGPT and Gemini keep ONE chat per Autopilot session. When that chat has taken this many characters (or the site says it is full) a new chat is started with the conversation so far."
         }
       }
     },

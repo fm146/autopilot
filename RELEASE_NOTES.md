@@ -1,5 +1,38 @@
-# Autopilot 1.2.3
+# Autopilot 1.3.5
 
+*An AI coding assistant made from reverse engineered Jetski RAG architecture.*
+
+Autopilot 1.3.5 adds **Claude, ChatGPT and Gemini through their websites** (your own account, no API key), a paper route for Research mode, a stealth browser for blocked searches, and many fixes. The notes of 1.2.3 follow below.
+
+---
+
+## What's new since 1.2.3
+
+### Claude, ChatGPT and Gemini through their websites
+- Three new model rows, each with a **slider**: ChatGPT *Instant · Thinking*, Gemini *Fast · Balanced · Deep*, Claude *Fast · Balanced · Deep*. The slider switches the website's own Think switch, reasoning level or effort setting.
+- Driven by Botasaurus (a real Chrome with anti-detection). You sign in once in the window that opens; the sign-in stays in a private Chrome profile. Autopilot checks it in a background Chrome and tells you: *"✓ Signed in to ChatGPT as <your name>. Sending your message…"*.
+- **One Autopilot chat = one website chat**, also after reopening the IDE; a new one only when the site says the chat is full.
+- Tool calls work as `TOOL_CALL {json}` lines (also when a page typesets the quotes), with a short protocol reminder on every later message.
+- Images, audio and files are sent as attachments. Voice messages: the audio model first, then ChatGPT, then Gemini.
+- *Thought for Ns…* instead of a blinking cursor while the model has not started writing; a crashed or closed browser is restarted by itself.
+- Automating these sites may go against their terms of service. Claude's selectors were checked against a free account; page layouts change, and `ragAssistant.webChatSites` patches them without a new release.
+
+### Research
+- **Paper route** for Research mode: Google Scholar through an MCP server with OpenAlex and arXiv as fallbacks, `paper_read`, `prototype_write` / `prototype_run` and `stackoverflow_search`. Paper tools unlock when you ask for journals.
+- **Stealth browser** (Botasaurus) retries blocked searches and Cloudflare-protected pages. Settings: `ragAssistant.stealthBrowser`, `ragAssistant.searchProxy`.
+- Web search fallbacks when the main engines block you.
+
+### Chat
+- File names in replies are clickable and open the file.
+- Replies that are only a JSON object with a tool's arguments are recognised as a tool call; an empty reply is reported instead of ending as a silent "Done".
+- The model picker follows changes of `ragAssistant.models` and `activeModelId` at once.
+
+### Fixes
+- Web models: answers of later messages appeared only after a reload; stale answers of an old chat were handed back as the new answer; long prompts froze the page; sending depended on a button that appears late; a closed browser ended every later message with a connection error.
+
+---
+
+## Autopilot 1.2.3
 *An AI coding assistant made from reverse engineered Jetski RAG architecture.*
 
 Autopilot 1.2.3 is the first release under the **Hints Technology** name. It brings a new identity, a much larger toolset around the chat, and a review flow for everything the agent changes in your code.

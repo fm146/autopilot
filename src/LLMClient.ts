@@ -1,6 +1,7 @@
 import * as http  from 'http';
 import * as https from 'https';
 import { ModelConfig } from './ModelRegistry';
+import { webChatAsk, parseToolCalls, WebSite, SiteConfig, WebFile } from './WebChat';
 
 export interface ChatMessage {
   role:    'system' | 'user' | 'assistant';
@@ -19,10 +20,13 @@ export interface StreamChunk {
   tokenUsage?: { prompt: number; completion: number; total: number };
 }
 
+export interface WebChatState { url?: string; chars: number; lastReply?: string; }
+
 export interface GenOptions {
   maxTokens?:   number;
   temperature?:  number;
   tools?:        unknown[];
+  helper?:       string;     // a side job (hearing, seeing) of the same session: web models give it a chat of its own, so the main chat stays clean
 }
 
 const AUDIO_MIME: Record<string, string> = {
@@ -210,7 +214,85 @@ export function extractLeakedToolCalls(
   return { calls, text: calls.length ? out.trim() : text, unparsed };
 }
 
+/**
+ * Some models end a turn with just the arguments of a tool call, without its name: {"url": "...", "max_chars": 20000}.
+ * It is that tool's call when exactly one tool has all those keys, accepts nothing else and gets all its required ones.
+ */
+export function inferBareToolCall(
+  text: string, defs: Array<{ function?: { name?: string; parameters?: { properties?: Record<string, unknown>; required?: string[] } } }>
+): { name: string; args: Record<string, unknown> } | null {
+  const t = text.trim();
+  if (!t.startsWith('{') || !t.endsWith('}') || t.length > 20000) return null;
+  let obj: unknown;
+  try { obj = JSON.parse(t); } catch { return null; }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const keys = Object.keys(obj as object);
+  if (!keys.length) return null;
+  const fits = defs.filter(d => {
+    const props = Object.keys(d.function?.parameters?.properties ?? {}), req = d.function?.parameters?.required ?? [];
+    return !!d.function?.name && keys.every(k => props.includes(k)) && req.every(k => keys.includes(k));
+  });
+  if (!fits.length) return null;
+  const extra = (d: (typeof fits)[number]) => Object.keys(d.function?.parameters?.properties ?? {}).length - keys.length;
+  const best = Math.min(...fits.map(extra));
+  const top = fits.filter(d => extra(d) === best);
+  return top.length === 1 ? { name: top[0].function!.name!, args: obj as Record<string, unknown> } : null;     // ambiguous: do not guess
+}
+
 type OnChunk = (c: StreamChunk) => void;
+
+// ── Models that live on a website (Claude, ChatGPT, Gemini through Chrome): no tool API, so tool calls are written as text ──
+const WEB_HARNESS =
+  'You are the model inside "Autopilot", an AI coding agent that works in the user\'s IDE. You can use tools.\n' +
+  'To call a tool, write one line exactly like this (the JSON on ONE line, only "name" and "arguments"):\n' +
+  'TOOL_CALL {"name": "view_file", "arguments": {"path": "src/app.ts"}}\n' +
+  'You may write several TOOL_CALL lines in one reply. After them STOP and wait: the results arrive in the next message. ' +
+  'Never describe a tool call in prose instead of writing it. When the task is finished, answer normally with no TOOL_CALL line. ' +
+  'Arguments marked * are required. You work on the user\'s files ONLY through tool calls: never paste code for the user to copy, ' +
+  'and never say that you cannot change files or run commands: call edit_file / create_file / run_command instead.';
+
+function compactTools(tools: unknown[] | undefined): string {
+  return (tools ?? []).map(t => {
+    const f = (t as { function?: { name?: string; description?: string; parameters?: { properties?: Record<string, unknown>; required?: string[] } } }).function;
+    if (!f?.name) return '';
+    const req = new Set(f.parameters?.required ?? []);
+    const params = Object.keys(f.parameters?.properties ?? {}).map(k => k + (req.has(k) ? '*' : '')).join(', ');
+    return `- ${f.name}(${params}): ${(f.description ?? '').split(/(?<=[.!?])\s/)[0].slice(0, 140)}`;
+  }).filter(Boolean).join('\n');
+}
+
+/** Images and voice messages of the messages about to be sent, as files for the site's chat box (at most four). */
+function webFiles(msgs: ChatMessage[]): WebFile[] {
+  const out: WebFile[] = [];
+  msgs.forEach((m, mi) => {
+    (m.images ?? []).forEach((b64, i) => {
+      const png = b64.startsWith('iVBOR'), gif = b64.startsWith('R0lGOD'), webp = b64.startsWith('UklGR');
+      const ext = png ? 'png' : gif ? 'gif' : webp ? 'webp' : 'jpg';
+      out.push({ name: `image${mi + 1}-${i + 1}.${ext}`, mime: ext === 'jpg' ? 'image/jpeg' : 'image/' + ext, b64 });
+    });
+    (m.audio ?? []).forEach((a, i) => out.push({ name: `voice${mi + 1}-${i + 1}.${a.format}`, mime: AUDIO_MIME[a.format] ?? 'audio/wav', b64: a.data }));
+  });
+  return out.slice(-4);
+}
+
+/** The later messages of a web chat carry a short reminder of the protocol: a long chat forgets the instructions of its first message, and the model then pastes code for the user instead of editing. */
+function webReminder(tools: unknown[] | undefined): string {
+  const core = ['view_file', 'edit_file', 'create_file', 'apply_diff', 'insert_at_line', 'run_command', 'list_directory', 'grep_search', 'search_files'];
+  const lines = compactTools(tools).split('\n').filter(l => core.some(n => l.startsWith('- ' + n + '(')));
+  if (!lines.length) return '';
+  return '\n\n[Autopilot reminder: you change the user\'s files ONLY by writing tool calls, one per line: TOOL_CALL {"name": "...", "arguments": {...}}. ' +
+    'Do not paste code for the user to copy and do not say you cannot edit: call the tool, then wait for its result. Main tools:\n' + lines.join('\n') + '\nThe full list came with the first message of this chat.]';
+}
+
+function webPrompt(msgs: ChatMessage[], tools: unknown[] | undefined): string {
+  const sys = msgs.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
+  const convo = msgs.filter(m => m.role !== 'system').map(m => (m.role === 'assistant' ? 'Assistant: ' : 'User: ') + m.content).join('\n\n');
+  const toolList = compactTools(tools);
+  const turns = msgs.filter(m => m.role !== 'system');
+  if (!toolList && !sys && turns.length === 1 && turns[0].role === 'user') return turns[0].content;      // a plain question is asked as it is
+  return (toolList ? `${WEB_HARNESS}\n\nTools:\n${toolList}\n\n` : '') +
+    (sys ? `<system>\n${sys}\n</system>\n\n` : '') + `Conversation so far:\n${convo}\n\nReply now as the assistant.`;
+}
 
 export class LLMClient {
   private active  = new Set<http.ClientRequest>();
@@ -228,6 +310,19 @@ export class LLMClient {
   openRouterReferer?: string;
   /** Up to 2 OpenRouter marketplace categories describing this app (setting ragAssistant.openRouterCategories). */
   openRouterCategories?: string;
+
+  /** Web chat models: asked once per site before the first use (browser automation of the user's own account). */
+  onWebChat?: (site: string, name: string) => Promise<boolean>;
+  onNotice?:  (message: string) => void;
+  onProgress?: (message: string) => void;
+  webOverrides?: Record<string, Partial<SiteConfig>>;
+  /** The Autopilot chat session this client belongs to: its web chat (claude.ai, chatgpt.com…) is the SAME conversation, message after message. */
+  webConvo = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  /** Where each session's web chat lives (its URL) and how much has gone into it; persisted by the chat provider. */
+  webStore?: { get(site: string, convo: string): WebChatState | undefined; set(site: string, convo: string, state: WebChatState): void };
+  webMaxChars = 120_000;                                    // a chat that took this much text is replaced by a new one
+  private webDelivered = new Map<string, number>();         // within one run: how many messages the site's chat has received
+  private webMem = new Map<string, WebChatState>();
 
   /** Called once per model request with the tokens used (reported by the provider, else estimated at ~4 chars/token). */
   onUsage?: (modelName: string, prompt: number, completion: number) => void;
@@ -251,6 +346,7 @@ export class LLMClient {
       switch (model.provider) {
         case 'ollama':  return await this.ollama(model, apiKey, messages, opts, wrapped);
         case 'gemini':  return await this.gemini(model, apiKey, messages, opts, wrapped);
+        case 'webchat': return await this.webchat(model, messages, opts, wrapped);
         default:        return await this.openai(model, apiKey, messages, opts, wrapped);
       }
     } finally {
@@ -258,6 +354,72 @@ export class LLMClient {
         this.onUsage(model.name || model.modelId,
           reported?.prompt ?? estimateTokens(messages),
           reported?.completion ?? Math.ceil(outChars / 4));
+      }
+    }
+  }
+
+  // ── Claude / ChatGPT / Gemini through their websites (Chrome driven by Botasaurus) ──────────
+  private async webchat(model: ModelConfig, msgs: ChatMessage[], opts: GenOptions, on: OnChunk): Promise<void> {
+    const site = model.modelId as WebSite;
+    if (!['claude', 'chatgpt', 'gemini'].includes(site)) { on({ type: 'error', error: `Unknown web chat site "${model.modelId}" (use claude, chatgpt or gemini)` }); return; }
+    if (this.onWebChat && !(await this.onWebChat(site, model.name))) { on({ type: 'error', error: `${model.name} was not allowed. Pick another model.` }); return; }
+
+    const nonSys = msgs.filter(m => m.role !== 'system');
+    const convoId = opts.helper ? this.webConvo + '#' + opts.helper : this.webConvo;
+    const dKey = site + (opts.helper ? '#' + opts.helper : '');
+    const afterLastAssistant = (): ChatMessage[] => nonSys.slice(nonSys.map(m => m.role).lastIndexOf('assistant') + 1);
+    // What the site's chat has not seen yet: within a run, everything after what was delivered; across runs, everything after its last reply
+    const unseen = (st: WebChatState | undefined): ChatMessage[] => {
+      const delivered = this.webDelivered.get(dKey);
+      let t: ChatMessage[];
+      if (delivered !== undefined && nonSys.length >= delivered) { t = nonSys.slice(delivered); if (t[0]?.role === 'assistant') t = t.slice(1); }     // the site wrote that reply itself
+      else if (st?.lastReply) {
+        let idx = -1;
+        nonSys.forEach((m, i) => { if (m.role === 'assistant' && (m.content === st.lastReply || (st.lastReply && st.lastReply.startsWith(m.content.slice(0, 80))))) idx = i; });
+        t = idx >= 0 ? nonSys.slice(idx + 1) : afterLastAssistant();
+      } else t = afterLastAssistant();
+      return t.length ? t : nonSys.slice(-1);
+    };
+    const tailText = (t: ChatMessage[]): string => t.length === 1 && t[0].role === 'user' ? t[0].content
+      : t.map(m => (m.role === 'assistant' ? 'Assistant: ' : 'User: ') + m.content).join('\n\n');
+
+    const memKey = site + '|' + convoId;
+    let st = this.webStore?.get(site, convoId) ?? this.webMem.get(memKey);        // persisted, or at least remembered for this run
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const continuing = !!st && !!st.url && st.chars < this.webMaxChars;
+      const tail = continuing ? unseen(st) : nonSys;
+      const prompt = continuing ? tailText(tail) + webReminder(opts.tools) : webPrompt(msgs, opts.tools);
+      const files = webFiles(tail);
+      let emitted = 0;
+      try {
+        const r = await webChatAsk({
+          site, prompt, files, mode: model.webMode, newChat: !continuing, url: continuing ? st!.url : undefined, overrides: this.webOverrides?.[site],
+          progress: m => this.onProgress?.(m), notice: m => this.onNotice?.(m),
+          abort: { aborted: () => this.aborted },
+          onText: full => {                                    // stream what is written before the first TOOL_CALL line
+            const cut = full.indexOf('TOOL_CALL');
+            const visible = cut >= 0 ? full.slice(0, cut) : full;
+            if (visible.length > emitted) { on({ type: 'delta', content: visible.slice(emitted) }); emitted = visible.length; }
+          }
+        });
+        const { text, calls } = parseToolCalls(r.text);
+        if (text.length > emitted && !r.text.includes('TOOL_CALL')) on({ type: 'delta', content: text.slice(emitted) });
+        for (const c of calls) on({ type: 'toolCall', toolName: c.name, toolArgs: c.args });
+        this.webDelivered.set(dKey, nonSys.length);
+        const next: WebChatState = { url: r.url ?? (continuing ? st!.url : undefined), chars: (continuing ? st!.chars : 0) + prompt.length + r.text.length, lastReply: text };
+        this.webMem.set(memKey, next);
+        this.webStore?.set(site, convoId, next);
+        on({ type: 'done' });
+        return;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (message === 'CHAT_FULL' && attempt === 0) {         // the site's chat is full: only now a new chat is started, with the whole context
+          this.onNotice?.('This chat has reached the site\'s length limit: continuing in a new chat with the conversation so far.');
+          st = undefined; this.webDelivered.delete(dKey);
+          continue;
+        }
+        on({ type: 'error', error: message === 'CHAT_FULL' ? 'The new chat is full as well.' : message });
+        return;
       }
     }
   }
@@ -286,17 +448,22 @@ export class LLMClient {
     const headers: Record<string, string> = {};
     if (apiKey) { headers['Authorization'] = `Bearer ${apiKey}`; }
 
+    // Reasoning models (gpt-oss, beam…) stream their thinking separately. It is not shown, but when a model thinks and then
+    // answers with nothing (no text, no tool call) the thinking is all there is, so it is used instead of an empty reply.
+    let sawContent = false, sawTool = false, thinking = '', flushed = false;
     return this.post(new URL('/api/chat', model.baseUrl), JSON.stringify(req), headers, line => {
       const d = JSON.parse(line);
-      // skip thinking tokens (gpt-oss / beam reasoning models)
-      if (d.message?.content) on({ type: 'delta', content: d.message.content });
+      if (typeof d.message?.thinking === 'string') thinking += d.message.thinking;
+      if (d.message?.content) { sawContent = true; on({ type: 'delta', content: d.message.content }); }
       // tool calls (Ollama returns them complete, not streamed)
       if (d.message?.tool_calls) {
         for (const tc of d.message.tool_calls) {
+          sawTool = true;
           on({ type: 'toolCall', toolName: tc.function.name, toolArgs: tc.function.arguments ?? {} });
         }
       }
       if (d.done) {
+        if (!flushed && !sawContent && !sawTool && thinking.trim()) { flushed = true; on({ type: 'delta', content: thinking.trim() }); }
         const p = Number(d.prompt_eval_count) || 0, c = Number(d.eval_count) || 0;
         on({ type: 'done', tokenUsage: p || c ? { prompt: p, completion: c, total: p + c } : undefined });
       }

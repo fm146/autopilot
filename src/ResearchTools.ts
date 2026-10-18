@@ -15,6 +15,8 @@ export interface ResearchOpts {
   brightKey?:   string;   // Bright Data API token (Google SERP API)
   brightZone?:  string;   // Bright Data SERP zone name
   workspaceRoot?: string; // where github_download_repository saves zips (<root>/.rag/references)
+  /** Web search through a real, anti-detection browser (Botasaurus): used when the plain engines are blocked. */
+  stealthSearch?: (query: string, limit: number) => Promise<{ engine: string; hits: Array<{ title: string; url: string; snippet: string }> }>;
 }
 
 const str = (d: string) => ({ type: 'string', description: d });
@@ -146,6 +148,21 @@ export const RESEARCH_TOOL_DEFS = [
   }
 ];
 
+RESEARCH_TOOL_DEFS.push({
+  type: 'function' as const,
+  function: {
+    name: 'stackoverflow_search',
+    description: 'Search Stack Overflow (official API) for a programming error or problem and return the best matching questions with their accepted or ' +
+      'top-voted answer, code included. Use it when a build, test or run fails and the error text alone does not tell you the fix: ' +
+      'pass the core of the error message (without file paths), optionally with tags such as "python,numpy".',
+    parameters: { type: 'object', properties: {
+      query: str('The error message or the problem, e.g. "ModuleNotFoundError: No module named numpy" or "TypeError: unhashable type: list"'),
+      tags:  str('Optional tags, comma separated, e.g. "python,pandas"'),
+      limit: { type: 'number', description: 'Questions to return (default 3, max 5)' }
+    }, required: ['query'] }
+  }
+} as (typeof RESEARCH_TOOL_DEFS)[number]);
+
 export const RESEARCH_TOOL_NAMES = new Set(RESEARCH_TOOL_DEFS.map(d => d.function.name));
 
 // ── HTTP ─────────────────────────────────────────────────────────
@@ -190,12 +207,17 @@ async function get(url: string, headers: Record<string, string> = {}, redirects 
   return { status: r.status, body: r.body.toString('utf8') };
 }
 
+export { getBuffer as httpGetBuffer };
+
+/** What the last GitHub reference searches found: the research agent reads it to decide whether paper research is allowed. */
+export const githubSearchStats = { searches: 0, lastCount: -1 };
+
 // ── ZIP extraction (no dependencies: central directory + zlib) ───
 const SKIP_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'bmp', 'tga', 'psd', 'ttf', 'otf', 'woff', 'woff2', 'eot',
   'mp3', 'wav', 'ogg', 'flac', 'mp4', 'webm', 'mov', 'avi', 'zip', 'gz', 'tgz', '7z', 'rar', 'jar', 'wasm', 'exe', 'dll', 'so',
   'dylib', 'a', 'lib', 'obj', 'o', 'pyc', 'class', 'bin', 'pdf', 'blend', 'fbx', 'glb', 'data', 'pak', 'dat']);
 
-function extractZip(buf: Buffer, dest: string): { files: number; bytes: number; skipped: number } {
+export function extractZip(buf: Buffer, dest: string): { files: number; bytes: number; skipped: number } {
   let eocd = -1;
   for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -330,6 +352,7 @@ async function githubSearchRepos(a: Record<string, unknown>, o: ResearchOpts): P
   if (!query) throw new Error('"query" is required.');
   const limit = Math.max(1, Math.min(30, Number(a.limit ?? 3)));
   const r = await (async () => { const s = await searchRepos(query, a.language, limit, o); return { total_count: s.total, items: s.items }; })();
+  githubSearchStats.searches++; githubSearchStats.lastCount = r.items.length;
   if (!r.items.length) return `No repositories found for "${query}". Try fewer or more general keywords.`;
   return `${r.total_count} repositories match "${query}"; top ${r.items.length} by stars:\n\n` + r.items.map((x, i) =>
     `${i + 1}. ${x.full_name}${x.archived ? ' (archived)' : ''} — ★${x.stargazers_count}` +
@@ -370,6 +393,7 @@ async function githubFetchTop(a: Record<string, unknown>, o: ResearchOpts): Prom
   if (!query) throw new Error('"query" is required.');
   const count = Math.max(1, Math.min(20, Number(a.count ?? 3)));          // 3 is the default; the user decides how many
   const found = await searchRepos(query, a.language, Math.min(100, count + Math.max(3, Math.ceil(count / 2))), o);   // spares for failed downloads
+  githubSearchStats.searches++; githubSearchStats.lastCount = found.items.length;
   if (!found.items.length) return `No repositories found for "${query}". Try fewer or more general keywords.`;
 
   // With many repositories the summaries stay short so the whole list fits in the model's context
@@ -586,6 +610,127 @@ async function githubSearch(a: Record<string, unknown>, o: ResearchOpts): Promis
     : `No file path in ${where} contains "${a.query}".`;
 }
 
+// ── Stack Overflow (api.stackexchange.com, no key needed; answers are gzip compressed) ─────────────────
+interface SoQuestion { question_id: number; title: string; link: string; score: number; is_answered: boolean; accepted_answer_id?: number; tags: string[]; answer_count: number; }
+interface SoAnswer   { answer_id: number; question_id: number; score: number; is_accepted: boolean; body: string; }
+
+async function soGet<T>(pathAndQuery: string): Promise<T> {
+  const r = await getBuffer('https://api.stackexchange.com/2.3' + pathAndQuery, { 'Accept-Encoding': 'gzip' }, 3, 2_000_000);
+  const raw = r.body.length > 2 && r.body[0] === 0x1f && r.body[1] === 0x8b ? zlib.gunzipSync(r.body) : r.body;
+  const j = JSON.parse(raw.toString('utf8')) as T & { error_message?: string; error_id?: number };
+  if (r.status >= 400 || j.error_id) throw new Error(`Stack Overflow API: ${j.error_message ?? 'HTTP ' + r.status}`);
+  return j;
+}
+
+/** Stack Overflow answers are HTML: keep the code blocks as fenced code and drop the rest of the markup. */
+function soText(html: string): string {
+  return html
+    .replace(/<pre[^>]*>\s*<code[^>]*>([\s\S]*?)<\/code>\s*<\/pre>/gi, (_, c: string) => '\n```\n' + c.replace(/<[^>]+>/g, '') + '\n```\n')
+    .replace(/<\/(p|li|h\d|blockquote)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<li[^>]*>/gi, '- ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(+d))
+    .replace(/\n{3,}/g, '\n\n').trim();
+}
+
+async function stackSearch(a: Record<string, unknown>): Promise<string> {
+  const query = String(a.query ?? '').replace(/[A-Za-z]:[\\/][^\s:"']*/g, '').replace(/\s+/g, ' ').trim().slice(0, 280);   // file paths never match anything
+  if (!query) throw new Error('"query" is required.');
+  const limit = Math.max(1, Math.min(5, Number(a.limit ?? 3)));
+  const tags  = String(a.tags ?? '').split(/[,;\s]+/).filter(Boolean).slice(0, 5).join(';');
+  const found = await soGet<{ items: SoQuestion[]; quota_remaining?: number }>(
+    `/search/advanced?order=desc&sort=relevance&q=${encodeURIComponent(query)}&answers=1&site=stackoverflow&pagesize=${limit + 3}` + (tags ? `&tagged=${encodeURIComponent(tags)}` : ''));
+  const qs = found.items.slice(0, limit);
+  if (!qs.length) return `No Stack Overflow question with an answer matches "${query}". Try the core of the error message only, fewer words, or google_search with "site:stackoverflow.com …".`;
+  const answers = await soGet<{ items: SoAnswer[] }>(
+    `/questions/${qs.map(q => q.question_id).join(';')}/answers?order=desc&sort=votes&site=stackoverflow&filter=withbody&pagesize=100`);
+  const out = qs.map((q, i) => {
+    const mine = answers.items.filter(x => x.question_id === q.question_id);
+    const best = mine.find(x => x.answer_id === q.accepted_answer_id) ?? mine[0];
+    return `### ${i + 1}. ${decode(q.title)}  (score ${q.score}${q.accepted_answer_id ? ', accepted answer' : ''}, ${q.tags.slice(0, 5).join(', ')})\n${q.link}\n` +
+      (best ? `${best.is_accepted ? 'Accepted answer' : 'Top answer'} (score ${best.score}):\n${trunc(soText(best.body), 1800)}` : '(no answer text returned)');
+  });
+  return `${qs.length} Stack Overflow result(s) for "${query}":\n\n${out.join('\n\n')}`;
+}
+
+// ── open scholarly indexes (fallback when Google Scholar blocks scripted requests) ─────────────────────
+export interface Paper { title: string; authors: string; year?: number | string; venue?: string; cited?: number; abstract?: string; url?: string; arxiv?: string; pdf?: string; source: string; }
+
+export const decodeXml = (s: string) => s.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+const getJson = async <T>(url: string): Promise<T> => {
+  const r = await getBuffer(url, { Accept: 'application/json' }, 4, 4_000_000);
+  if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+  return JSON.parse(r.body.toString('utf8')) as T;
+};
+
+async function openAlex(query: string, n: number, yearFrom?: number, yearTo?: number): Promise<Paper[]> {
+  const filters: string[] = [];
+  if (yearFrom) filters.push(`from_publication_date:${yearFrom}-01-01`);
+  if (yearTo)   filters.push(`to_publication_date:${yearTo}-12-31`);
+  const url = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${n}` +
+    `&select=title,publication_year,doi,cited_by_count,authorships,primary_location,open_access,abstract_inverted_index,ids` + (filters.length ? `&filter=${filters.join(',')}` : '');
+  const j = await getJson<{ results?: Array<Record<string, any>> }>(url);
+  return (j.results ?? []).map(w => {
+    const inv = w.abstract_inverted_index as Record<string, number[]> | null;
+    let abstract = '';
+    if (inv) {
+      const words: string[] = [];
+      for (const [word, pos] of Object.entries(inv)) for (const p of pos) words[p] = word;
+      abstract = words.filter(Boolean).join(' ');
+    }
+    const loc = w.primary_location ?? {};
+    const landing: string | undefined = loc.landing_page_url ?? undefined;
+    const arx = /arxiv\.org\/(?:abs|pdf)\/([^\s?#]+?)(?:v\d+)?(?:\.pdf)?$/i.exec(landing ?? '')?.[1];
+    return {
+      title: String(w.title ?? '(untitled)'), year: w.publication_year, cited: w.cited_by_count,
+      authors: (w.authorships ?? []).slice(0, 4).map((a: any) => a.author?.display_name).filter(Boolean).join(', ') + ((w.authorships ?? []).length > 4 ? ' et al.' : ''),
+      venue: loc.source?.display_name, abstract, url: landing ?? (w.doi as string | undefined), arxiv: arx, pdf: w.open_access?.oa_url as string | undefined, source: 'OpenAlex'
+    } as Paper;
+  });
+}
+
+export async function arxivSearch(query: string, n: number): Promise<Paper[]> {
+  const terms = query.replace(/[^\w\s-]/g, ' ').split(/\s+/).filter(w => w.length > 2).slice(0, 8).map(w => `all:${w}`).join('+AND+');
+  if (!terms) return [];
+  const r = await getBuffer(`https://export.arxiv.org/api/query?search_query=${terms}&max_results=${n}&sortBy=relevance`, {}, 4, 2_000_000);
+  if (r.status !== 200) return [];
+  const xml = r.body.toString('utf8');
+  return [...xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)].map(m => {
+    const e = m[1];
+    const id = /<id>https?:\/\/arxiv\.org\/abs\/([^<]+?)(?:v\d+)?<\/id>/.exec(e)?.[1];
+    return {
+      title: decodeXml(/<title>([\s\S]*?)<\/title>/.exec(e)?.[1] ?? ''),
+      authors: [...e.matchAll(/<name>([^<]+)<\/name>/g)].slice(0, 4).map(a => a[1]).join(', '),
+      year: /<published>(\d{4})/.exec(e)?.[1], abstract: decodeXml(/<summary>([\s\S]*?)<\/summary>/.exec(e)?.[1] ?? ''),
+      url: id ? `https://arxiv.org/abs/${id}` : undefined, arxiv: id, source: 'arXiv'
+    } as Paper;
+  }).filter(p => p.title);
+}
+
+export async function openPapers(query: string, n: number, yearFrom?: number, yearTo?: number): Promise<Paper[]> {
+  const [a, b] = await Promise.allSettled([openAlex(query, n, yearFrom, yearTo), arxivSearch(query, Math.max(3, Math.ceil(n / 2)))]);
+  const out: Paper[] = a.status === 'fulfilled' ? a.value : [];
+  const seen = new Set(out.map(p => p.title.toLowerCase().replace(/\W+/g, '')));
+  if (b.status === 'fulfilled') for (const p of b.value) {
+    if (yearFrom && p.year && +p.year < yearFrom) continue;
+    if (yearTo && p.year && +p.year > yearTo) continue;
+    const k = p.title.toLowerCase().replace(/\W+/g, '');
+    if (!seen.has(k)) { seen.add(k); out.push(p); } else {                  // same paper: remember its arXiv id
+      const dup = out.find(x => x.title.toLowerCase().replace(/\W+/g, '') === k); if (dup && !dup.arxiv) dup.arxiv = p.arxiv;
+    }
+  }
+  return out.slice(0, n + 2);
+}
+
+export const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n).trimEnd() + '…' : s);
+export function formatPapers(ps: Paper[]): string {
+  return ps.map((p, i) =>
+    `${i + 1}. ${p.title}\n   ${[p.authors, p.venue, p.year, p.cited !== undefined ? `cited by ${p.cited}` : ''].filter(Boolean).join(' · ')}  [${p.source}]\n` +
+    (p.abstract ? `   ${clip(p.abstract, 420)}\n` : '') +
+    `   ${p.arxiv ? `arXiv:${p.arxiv} (readable with paper_read) · ` : ''}${p.url ?? ''}${p.pdf && p.pdf !== p.url ? ` · pdf: ${p.pdf}` : ''}`).join('\n\n');
+}
+
+
 // ── Web search ───────────────────────────────────────────────────
 const decode = (s: string) => s
   .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -616,7 +761,7 @@ async function webSearch(a: Record<string, unknown>, o: ResearchOpts): Promise<s
       : `No Google results for "${query}".`;
   }
 
-  return freeWebSearch(query, limit);
+  return freeWebSearch(query, limit, o);
 }
 
 // ── Free web search (no key): DuckDuckGo, then Bing ──────────────
@@ -629,7 +774,7 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 /** An engine that served a captcha / 403: leave it alone for a while instead of making the block worse. */
 class BlockedError extends Error {}
 const blockedUntil = new Map<string, number>();
-const COOLDOWN_MS = 8 * 60_000;
+const COOLDOWN_MS = 4 * 60_000;
 
 async function ddgSearch(query: string, limit: number): Promise<SearchHit[]> {
   const r = await get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, { 'User-Agent': BROWSER_UA });
@@ -704,7 +849,34 @@ async function googleSearch(query: string, limit: number): Promise<SearchHit[]> 
   return hits;
 }
 
-async function freeWebSearch(query: string, limit: number): Promise<string> {
+/** Wikipedia's own search API: needs no key, is never blocked like a scraped engine, and answers "what is X" questions. */
+async function wikipediaSearch(query: string, limit: number): Promise<SearchHit[]> {
+  const j = await getJson<{ query?: { search?: Array<{ title: string; snippet: string }> } }>(
+    `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&srlimit=${limit}&format=json&utf8=1`);
+  return (j.query?.search ?? []).map(h => ({ title: h.title, url: 'https://en.wikipedia.org/wiki/' + encodeURIComponent(h.title.replace(/ /g, '_')), snippet: decode(h.snippet) }));
+}
+
+/** What still works when every general engine is blocked: scholarly indexes for papers, Stack Overflow for programming problems. */
+async function searchFallback(query: string, limit: number, why: string): Promise<string | undefined> {
+  const academic = /\b(journal|journals|jurnal|paper|papers|arxiv|scholar|doi|citation|proceedings|conference|ieee|acm|survey|literature|publication)\b/i.test(query);
+  const coding = /site:stackoverflow\.com|stack ?overflow|\b(error|exception|traceback|typeerror|referenceerror|syntaxerror|segfault|undefined reference|cannot find|failed to|modulenotfound|unresolved)\b/i.test(query);
+  try {
+    if (academic) {
+      const papers = await openPapers(query.replace(/\b(journal|journals|jurnal|paper|papers)\b/gi, ' ').replace(/\s+/g, ' ').trim() || query, Math.min(8, limit));
+      if (papers.length) return `${why}. Papers for "${query}" from OpenAlex and arXiv instead:\n\n${formatPapers(papers)}`;
+    }
+    if (coding) {
+      const t = await stackSearch({ query: query.replace(/site:\S+/gi, ' ').replace(/stack ?overflow/gi, ' '), limit: Math.min(3, limit) });
+      if (!/^No Stack Overflow question/.test(t)) return `${why}. Stack Overflow results instead:\n\n${t}`;
+    }
+    const wiki = await wikipediaSearch(query.replace(/site:\S+/gi, ' ').trim(), Math.min(5, limit));
+    if (wiki.length) return `${why}. Wikipedia results for "${query}" instead (general knowledge only, not a replacement for documentation):\n\n` +
+      wiki.map((x, i) => `${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet}`).join('\n\n');
+  } catch { /* the fallback is a bonus */ }
+  return undefined;
+}
+
+async function freeWebSearch(query: string, limit: number, o: ResearchOpts = {}): Promise<string> {
   const key = `${limit}|${query.toLowerCase()}`;
   const cached = searchCache.get(key);
   if (cached && Date.now() - cached.at < 10 * 60_000) return cached.text;
@@ -714,7 +886,7 @@ async function freeWebSearch(query: string, limit: number): Promise<string> {
   lastSearchAt = Date.now();
 
   const problems: string[] = [];
-  // Bing is deliberately NOT used: it returns plausible but unrelated results to automated queries, which is worse than failing
+  // Bing is deliberately NOT used: it returns plausible but unrelated pages to automated queries (checked again), which is worse than failing
   for (const [engine, fn] of [['Google', googleSearch], ['DuckDuckGo', ddgSearch]] as const) {
     const until = blockedUntil.get(engine) ?? 0;
     if (Date.now() < until) { problems.push(`${engine} is cooling down after a block (about ${Math.ceil((until - Date.now()) / 60000)} min left)`); continue; }
@@ -731,8 +903,26 @@ async function freeWebSearch(query: string, limit: number): Promise<string> {
       problems.push(`${engine} ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  throw new Error(`Web search failed: ${problems.join('; ')}. Search engines throttle bursts of automated queries: stop searching for now, ` +
-    `rely on what you already found, or ask the user to configure Bright Data ("RAG: Set Bright Data API Key") for reliable Google results.`);
+  // Both plain engines are blocked: a real Chrome driven by Botasaurus is not (it gets normal result pages)
+  if (o.stealthSearch) {
+    try {
+      const r = await o.stealthSearch(query, limit);
+      if (r.hits.length) {
+        const text = `${r.engine} results for "${query}" (fetched through a stealth browser, because Google and DuckDuckGo block plain requests):\n\n` +
+          r.hits.map((x, i) => `${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet}`).join('\n\n');
+        if (searchCache.size > 100) searchCache.clear();
+        searchCache.set(key, { at: Date.now(), text });
+        return text;
+      }
+      problems.push('stealth browser: no results');
+    } catch (e) { problems.push('stealth browser ' + (e instanceof Error ? e.message.split('\n')[0].slice(0, 160) : String(e))); }
+  }
+  const fallback = await searchFallback(query, limit, 'The web search engines are unavailable (' + problems.join('; ') + ')');
+  if (fallback) return fallback;
+  throw new Error(`Web search failed: ${problems.join('; ')}. Do not keep retrying web search: the engines throttle bursts of automated queries. ` +
+    `Use what still works: stackoverflow_search (programming errors and how-tos), package_info (library docs and versions), the github_* tools (code), ` +
+    `web_fetch on a page whose URL you already know (official documentation, arxiv.org), or the paper tools when they are unlocked. ` +
+    `Or tell the user to set a Bright Data key ("Autopilot: Set Bright Data API Key") for reliable Google results.`);
 }
 
 // ── Package registries ───────────────────────────────────────────
@@ -805,6 +995,7 @@ export async function runResearchTool(name: string, args: Record<string, unknown
     case 'github_search_files':         return githubSearch(args, o);
     case 'google_search':               return webSearch(args, o);
     case 'package_info':                return packageInfo(args, o);
+    case 'stackoverflow_search':        return stackSearch(args);
     default: throw new Error(`Unknown research tool: ${name}`);
   }
 }

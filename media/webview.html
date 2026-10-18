@@ -247,6 +247,8 @@ select:focus{outline:1px solid var(--acc)}
   font-size:12px;color:var(--cyn);
 }
 .msg-content pre code{background:none;padding:0;color:var(--fg)}
+.msg-content code.file-link{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+.msg-content code.file-link:hover{background:rgba(121,184,255,.2);color:#79b8ff;text-decoration-style:solid}
 .msg-content ul,.msg-content ol{margin:5px 0 5px 18px}
 .msg-content li{margin-bottom:2px}
 .msg-content strong{color:var(--fg);font-weight:600}
@@ -288,6 +290,10 @@ select:focus{outline:1px solid var(--acc)}
   white-space:pre-wrap;max-height:120px;overflow-y:auto;word-break:break-all;
 }
 .tool-result.fail{border-left-color:var(--red);color:var(--red)}
+
+/* Thinking time */
+.thinking,.thought{color:var(--fg3);font-size:12px;font-style:italic}
+.thought{margin-bottom:4px}
 
 /* Streaming cursor */
 @keyframes blink{50%{opacity:0}}
@@ -955,6 +961,32 @@ $id('chat').addEventListener('click', e => {
   if (e.target.closest('.fc-name')) postMsg('reviewAction', { path: card.dataset.path, action: 'open' });
 });
 
+// A file name in a reply (inline code such as `output/report.txt` or `src/a.ts:42`) opens in the editor, in a new tab
+const FILE_EXT = new Set(['md','txt','json','jsonc','ts','tsx','js','jsx','mjs','cjs','py','rs','go','java','kt','c','h','cpp','hpp','cc','cs','html','htm','css','scss',
+  'xml','svg','yml','yaml','toml','ini','cfg','conf','sh','bat','cmd','ps1','sql','csv','tsv','pdf','png','jpg','jpeg','gif','webp','lock','gradle','php','rb','swift',
+  'dart','vue','svelte','tex','bib','ipynb','env','gitignore','dockerfile','mdx','proto','lua','r','m','zig','wgsl','glsl','hlsl','cu','cmake','mk']);
+function looksLikePath(t) {
+  if (!t || t.length > 260 || /\s/.test(t) || !/^[\w.@~:\\\/+\-]+$/.test(t)) return false;
+  const m = /^(.+?)(?::\d+(?:[-:]\d+)?)?$/.exec(t), p = m ? m[1] : t;
+  if (/^[a-z]+:\/\//i.test(p)) return false;                              // URLs
+  const ext = (/\.([A-Za-z0-9]+)$/.exec(p) || [])[1];
+  return !!ext && FILE_EXT.has(ext.toLowerCase());
+}
+function markFileLinks(n) {
+  if (!n || n.nodeType !== 1) return;
+  const codes = n.matches && n.matches('.msg-content code') ? [n] : Array.from(n.querySelectorAll ? n.querySelectorAll('.msg-content code') : []);
+  codes.forEach(c => {
+    if (c.closest('pre') || c.dataset.fl) return;
+    c.dataset.fl = '1';
+    if (looksLikePath(c.textContent.trim())) { c.classList.add('file-link'); c.title = 'Open in the editor'; }
+  });
+}
+new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(markFileLinks))).observe($id('chat'), { childList: true, subtree: true });
+$id('chat').addEventListener('click', e => {
+  const c = e.target.closest && e.target.closest('code.file-link');
+  if (c) postMsg('openFile', { path: c.textContent.trim() });
+});
+
 // A message that has to wait shows a note under its user card, with a way to cancel it
 function onQueued(runId, text) {
   if (!turnBody) return;
@@ -1280,7 +1312,7 @@ function closeModelMenu() {
   $id('modelBtn').classList.remove('open');
 }
 // Models of one family (same provider) share a row; a slider picks the variant (size)
-const PROVIDER_LABEL = { ollama: 'Ollama', openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter', custom: 'Custom' };
+const PROVIDER_LABEL = { ollama: 'Ollama', openai: 'OpenAI', gemini: 'Gemini', openrouter: 'OpenRouter', custom: 'Custom', webchat: 'Web' };
 const paramsOf = m => { const x = /(\d+(?:\.\d+)?)\s*B\b/i.exec((m.variant || '') + ' ' + m.name); return x ? parseFloat(x[1]) : 1e9; };
 let groupSel = {};     // group key -> id of the variant last chosen on its slider
 function modelGroups() {
@@ -1488,19 +1520,36 @@ $id('chat').addEventListener('click', e => {
 
 let lastToolRow = null;
 
+// While the model has not produced any text yet the row says "Thought for Ns…" (counting up); once the answer starts
+// the label freezes at the real thinking time. The timer lives on the element, so every running task has its own.
+const thoughtSecs = el => Math.max(1, Math.round((Date.now() - el._t0) / 1000));
+function thinkingStop(el) {
+  if (!el || !el._t0) return;
+  clearInterval(el._timer);
+  el._thought = thoughtSecs(el); el._t0 = 0;
+}
+const thoughtHtml = el => el && el._thought ? '<div class="thought">Thought for ' + el._thought + 's</div>' : '';
+
 function onStreamStart(modelName, iter) {
   currentModelName = modelName||'';
   setStreaming(true, currentModelName);
-  const el = addRow('', 'Assistant', '<span class="cursor"></span>',
+  const el = addRow('', 'Assistant', '<span class="thinking">Thought for 1s…</span>',
     { authorClass: 'asst', tag: currentModelName });
+  el._t0 = Date.now();
+  el._timer = setInterval(() => {
+    const t = el.querySelector('.thinking');
+    if (!el.isConnected || !t) { clearInterval(el._timer); return; }
+    t.textContent = 'Thought for ' + thoughtSecs(el) + 's…';
+  }, 1000);
   streamEl   = el;
   streamText = '';
 }
 
 function onStreamDelta(content) {
   if (!streamEl) return;
+  thinkingStop(streamEl);
   streamText += content;
-  streamEl.innerHTML = escHtml(streamText) + '<span class="cursor"></span>';
+  streamEl.innerHTML = thoughtHtml(streamEl) + escHtml(streamText) + '<span class="cursor"></span>';
   $id('chat').scrollTop = $id('chat').scrollHeight;
 }
 
@@ -1509,10 +1558,11 @@ function onStreamEnd(cleanText) {
     // cleanText: text with leaked tool-call markup stripped by the extension
     if (typeof cleanText === 'string') streamText = cleanText;
     const row = streamEl.closest('.msg-row');
+    thinkingStop(streamEl);
     if (!streamText.trim()) {
       if (row) row.remove();
     } else {
-      streamEl.innerHTML = renderMd(streamText);
+      streamEl.innerHTML = thoughtHtml(streamEl) + renderMd(streamText);
       if (row) row.querySelector('.msg-dot')?.classList.add('done');
     }
     streamEl = null; streamText = '';
@@ -1527,7 +1577,12 @@ function onError(text) {
 }
 
 function onSystemMsg(md) {
-  addRow('system', 'System', renderMd(md||''), { authorClass: 'system' });
+  const el = addRow('system', 'System', renderMd(md||''), { authorClass: 'system' });
+  // A notice that arrives while the answer row is still empty (sign-in checks, "sending your message…") belongs above it
+  if (streamEl && !streamText) {
+    const row = el.closest('.msg-row'), streamRow = streamEl.closest('.msg-row');
+    if (row && streamRow && row.parentNode === streamRow.parentNode) streamRow.parentNode.insertBefore(row, streamRow);
+  }
   $id('chat').scrollTop = $id('chat').scrollHeight;
 }
 

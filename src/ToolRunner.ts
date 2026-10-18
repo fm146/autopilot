@@ -1219,6 +1219,7 @@ export interface ToolResult {
 }
 
 export class ToolRunner {
+  stealthFetch:  ((url: string, maxChars: number) => Promise<string>) | undefined;   // set by the chat provider: Botasaurus
   researchOpts:  (() => Promise<ResearchOpts>) | undefined;   // GitHub token / Google key for the research tools
   terminalBufFn: (() => string) | undefined;
   onBackground:  ((msg: string) => void) | undefined;
@@ -1481,7 +1482,11 @@ export class ToolRunner {
       case 'web_fetch': {
         const url      = String(a.url);
         const maxChars = Number(a.max_chars ?? 4000);
-        return fetchUrl(url, maxChars);
+        try { return await fetchUrl(url, maxChars); }
+        catch (e) {
+          if (!(e as { challenge?: boolean }).challenge || !this.stealthFetch) throw e;
+          return this.stealthFetch(url, maxChars);               // Botasaurus: a real Chrome gets through Cloudflare-style challenges
+        }
       }
 
       // ── get_diagnostics ────────────────────────────────────────
@@ -2620,6 +2625,12 @@ function fetchUrl(url: string, maxChars: number): Promise<string> {
       res.setEncoding('utf8');
       res.on('data', (c: string) => { if (body.length < 2_000_000) body += c; });
       res.on('end', () => {
+        const code = res.statusCode ?? 0;
+        // 403 / 429 / 503 or a "just a moment…" page: a bot challenge, not content. The caller may retry in the stealth browser.
+        if (code === 403 || code === 429 || code === 503 || (code >= 400 && /just a moment|cf-chl|attention required|verify you are (a )?human|enable javascript and cookies/i.test(body.slice(0, 4000)))) {
+          reject(Object.assign(new Error(`HTTP ${code} (the site blocked the request or asked for a bot challenge)`), { challenge: true }));
+          return;
+        }
         const type = String(res.headers['content-type'] ?? '');
         const isHtml = /html/i.test(type) || /^\s*(<!doctype html|<html)/i.test(body);
         resolve((isHtml ? htmlToText(body) : body).slice(0, maxChars));
