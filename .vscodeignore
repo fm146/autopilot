@@ -6,3 +6,5 @@ node_modules/**
 out/test/**
 *.map
 *.vsix
+media/screenshots/**
+RELEASE_NOTES.md

@@ -5,6 +5,15 @@
   "version": "1.2.3",
   "publisher": "hintstechnology",
   "author": "Hints Technology",
+  "license": "BSD-2-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fm146/autopilot.git"
+  },
+  "homepage": "https://github.com/fm146/autopilot#readme",
+  "bugs": {
+    "url": "https://github.com/fm146/autopilot/issues"
+  },
   "icon": "media/icon.png",
   "engines": {
     "vscode": "^1.85.0"
